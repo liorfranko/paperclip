@@ -2498,7 +2498,9 @@ export function AgentSkillsTab({
   const [skillDraft, setSkillDraft] = useState<string[]>([]);
   const [lastSavedSkills, setLastSavedSkills] = useState<string[]>([]);
   const [unmanagedOpen, setUnmanagedOpen] = useState(false);
+  const [excludedSkillsDraft, setExcludedSkillsDraft] = useState<string[]>([]);
   const lastSavedSkillsRef = useRef<string[]>([]);
+  const lastSavedExcludedRef = useRef<string[]>([]);
   const hasHydratedSkillSnapshotRef = useRef(false);
   const skipNextSkillAutosaveRef = useRef(true);
 
@@ -2515,10 +2517,12 @@ export function AgentSkillsTab({
   });
 
   const syncSkills = useMutation({
-    mutationFn: (desiredSkills: string[]) => agentsApi.syncSkills(agent.id, desiredSkills, companyId),
+    mutationFn: (params: { desiredSkills: string[]; excludedSkills: string[] }) =>
+      agentsApi.syncSkills(agent.id, params.desiredSkills, companyId, params.excludedSkills),
     onSuccess: async (snapshot) => {
       queryClient.setQueryData(queryKeys.agents.skills(agent.id), snapshot);
       lastSavedSkillsRef.current = snapshot.desiredSkills;
+      lastSavedExcludedRef.current = snapshot.excludedSkills ?? [];
       setLastSavedSkills(snapshot.desiredSkills);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) }),
@@ -2530,7 +2534,9 @@ export function AgentSkillsTab({
   useEffect(() => {
     setSkillDraft([]);
     setLastSavedSkills([]);
+    setExcludedSkillsDraft([]);
     lastSavedSkillsRef.current = [];
+    lastSavedExcludedRef.current = [];
     hasHydratedSkillSnapshotRef.current = false;
     skipNextSkillAutosaveRef.current = true;
   }, [agent.id]);
@@ -2550,6 +2556,10 @@ export function AgentSkillsTab({
     setSkillDraft(nextState.draft);
     lastSavedSkillsRef.current = nextState.lastSaved;
     setLastSavedSkills(nextState.lastSaved);
+    if (!lastSavedExcludedRef.current.length && skillSnapshot.excludedSkills?.length) {
+      setExcludedSkillsDraft(skillSnapshot.excludedSkills);
+      lastSavedExcludedRef.current = skillSnapshot.excludedSkills;
+    }
   }, [skillDraft, skillSnapshot]);
 
   useEffect(() => {
@@ -2559,16 +2569,20 @@ export function AgentSkillsTab({
       return;
     }
     if (syncSkills.isPending) return;
-    if (arraysEqual(skillDraft, lastSavedSkillsRef.current)) return;
+    const skillsChanged = !arraysEqual(skillDraft, lastSavedSkillsRef.current);
+    const excludedChanged = !arraysEqual(excludedSkillsDraft, lastSavedExcludedRef.current);
+    if (!skillsChanged && !excludedChanged) return;
 
     const timeout = window.setTimeout(() => {
-      if (!arraysEqual(skillDraft, lastSavedSkillsRef.current)) {
-        syncSkills.mutate(skillDraft);
+      const shouldSync = !arraysEqual(skillDraft, lastSavedSkillsRef.current)
+        || !arraysEqual(excludedSkillsDraft, lastSavedExcludedRef.current);
+      if (shouldSync) {
+        syncSkills.mutate({ desiredSkills: skillDraft, excludedSkills: excludedSkillsDraft });
       }
     }, 250);
 
     return () => window.clearTimeout(timeout);
-  }, [skillDraft, skillSnapshot, syncSkills.isPending, syncSkills.mutate]);
+  }, [skillDraft, excludedSkillsDraft, skillSnapshot, syncSkills.isPending, syncSkills.mutate]);
 
   const companySkillByKey = useMemo(
     () => new Map((companySkills ?? []).map((skill) => [skill.key, skill])),
@@ -2669,7 +2683,7 @@ export function AgentSkillsTab({
     }
     return "Paperclip cannot manage skills for this adapter yet. Manage them in the adapter directly.";
   }, [agent.adapterConfig.agent, agent.adapterType, skillSnapshot?.mode]);
-  const hasUnsavedChanges = !arraysEqual(skillDraft, lastSavedSkills);
+  const hasUnsavedChanges = !arraysEqual(skillDraft, lastSavedSkills) || !arraysEqual(excludedSkillsDraft, lastSavedExcludedRef.current);
   const saveStatusLabel = syncSkills.isPending
     ? "Saving changes..."
     : hasUnsavedChanges
@@ -2760,18 +2774,26 @@ export function AgentSkillsTab({
                 );
               }
 
-              const checked = required || skillDraft.includes(skill.key);
-              const disabled = required || skillSnapshot?.mode === "unsupported";
+              const isExcluded = excludedSkillsDraft.includes(skill.key);
+              const checked = required ? !isExcluded : skillDraft.includes(skill.key);
+              const disabled = skillSnapshot?.mode === "unsupported";
               const checkbox = (
                 <input
                   type="checkbox"
                   checked={checked}
                   disabled={disabled}
                   onChange={(event) => {
-                    const next = event.target.checked
-                      ? Array.from(new Set([...skillDraft, skill.key]))
-                      : skillDraft.filter((value) => value !== skill.key);
-                    setSkillDraft(next);
+                    if (required) {
+                      const nextExcluded = event.target.checked
+                        ? excludedSkillsDraft.filter((k) => k !== skill.key)
+                        : [...excludedSkillsDraft, skill.key];
+                      setExcludedSkillsDraft(nextExcluded);
+                    } else {
+                      const next = event.target.checked
+                        ? Array.from(new Set([...skillDraft, skill.key]))
+                        : skillDraft.filter((value) => value !== skill.key);
+                      setSkillDraft(next);
+                    }
                   }}
                   className="mt-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                 />

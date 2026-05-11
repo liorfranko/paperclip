@@ -1613,6 +1613,7 @@ export function resolvePaperclipDesiredSkillNames(
 export function writePaperclipSkillSyncPreference(
   config: Record<string, unknown>,
   desiredSkills: string[],
+  excludedSkills?: string[],
 ): Record<string, unknown> {
   const next = { ...config };
   const raw = next.paperclipSkillSync;
@@ -1627,6 +1628,14 @@ export function writePaperclipSkillSyncPreference(
         .filter(Boolean),
     ),
   );
+  if (excludedSkills !== undefined) {
+    const excluded = excludedSkills.filter((v) => v.trim()).map((v) => v.trim());
+    if (excluded.length > 0) {
+      current.excludedSkills = Array.from(new Set(excluded));
+    } else {
+      delete current.excludedSkills;
+    }
+  }
   next.paperclipSkillSync = current;
   return next;
 }

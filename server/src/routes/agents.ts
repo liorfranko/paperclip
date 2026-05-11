@@ -1194,12 +1194,14 @@ export function agentRoutes(
   function buildUnsupportedSkillSnapshot(
     adapterType: string,
     desiredSkills: string[] = [],
+    excludedSkills: string[] = [],
   ): AgentSkillSnapshot {
     return {
       adapterType,
       supported: false,
       mode: "unsupported",
       desiredSkills,
+      excludedSkills,
       entries: [],
       warnings: ["This adapter does not implement skill sync yet."],
     };
@@ -1241,6 +1243,7 @@ export function agentRoutes(
     adapterType: string,
     adapterConfig: Record<string, unknown>,
     requestedDesiredSkills: string[] | undefined,
+    excludedSkills?: string[],
   ) {
     if (!requestedDesiredSkills) {
       return {
@@ -1257,13 +1260,14 @@ export function agentRoutes(
     const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(companyId, {
       materializeMissing: shouldMaterializeRuntimeSkillsForAdapter(adapterType),
     });
+    const excludedSet = new Set(excludedSkills ?? []);
     const requiredSkills = runtimeSkillEntries
-      .filter((entry) => entry.required)
+      .filter((entry) => entry.required && !excludedSet.has(entry.key))
       .map((entry) => entry.key);
     const desiredSkills = Array.from(new Set([...requiredSkills, ...resolvedRequestedSkills]));
 
     return {
-      adapterConfig: writePaperclipSkillSyncPreference(adapterConfig, desiredSkills),
+      adapterConfig: writePaperclipSkillSyncPreference(adapterConfig, desiredSkills, excludedSkills),
       desiredSkills,
       runtimeSkillEntries,
     };
@@ -1484,7 +1488,7 @@ export function agentRoutes(
       });
       const excludedSet = new Set(preference.excludedSkills);
       const requiredSkills = runtimeSkillEntries.filter((entry) => entry.required && !excludedSet.has(entry.key)).map((entry) => entry.key);
-      res.json(buildUnsupportedSkillSnapshot(agent.adapterType, Array.from(new Set([...requiredSkills, ...preference.desiredSkills]))));
+      res.json(buildUnsupportedSkillSnapshot(agent.adapterType, Array.from(new Set([...requiredSkills, ...preference.desiredSkills])), preference.excludedSkills));
       return;
     }
 
@@ -1525,6 +1529,13 @@ export function agentRoutes(
             .filter(Boolean),
         ),
       );
+      const excludedSkills = Array.from(
+        new Set(
+          ((req.body.excludedSkills as string[] | undefined) ?? [])
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      );
       const {
         adapterConfig: nextAdapterConfig,
         desiredSkills,
@@ -1534,6 +1545,7 @@ export function agentRoutes(
         agent.adapterType,
         agent.adapterConfig as Record<string, unknown>,
         requestedSkills,
+        excludedSkills,
       );
       if (!desiredSkills || !runtimeSkillEntries) {
         throw unprocessable("Skill sync requires desiredSkills.");
@@ -1576,7 +1588,7 @@ export function agentRoutes(
               adapterType: updated.adapterType,
               config: runtimeSkillConfig,
             })
-          : buildUnsupportedSkillSnapshot(updated.adapterType, desiredSkills);
+          : buildUnsupportedSkillSnapshot(updated.adapterType, desiredSkills, excludedSkills);
 
       await logActivity(db, {
         companyId: updated.companyId,
