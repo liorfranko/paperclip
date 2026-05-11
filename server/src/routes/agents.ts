@@ -1482,7 +1482,8 @@ export function agentRoutes(
       const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(agent.companyId, {
         materializeMissing: false,
       });
-      const requiredSkills = runtimeSkillEntries.filter((entry) => entry.required).map((entry) => entry.key);
+      const excludedSet = new Set(preference.excludedSkills);
+      const requiredSkills = runtimeSkillEntries.filter((entry) => entry.required && !excludedSet.has(entry.key)).map((entry) => entry.key);
       res.json(buildUnsupportedSkillSnapshot(agent.adapterType, Array.from(new Set([...requiredSkills, ...preference.desiredSkills]))));
       return;
     }
