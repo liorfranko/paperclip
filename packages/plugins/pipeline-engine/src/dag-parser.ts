@@ -112,7 +112,7 @@ export function validateCoverage(pipeline: PipelineDefinition): ValidationResult
     const action = getActionById(stage.actionId);
     if (!action) continue;
 
-    const outgoingEdges = pipeline.edges.filter((e) => e.from === stage.id && e.type !== "error" && e.type !== "loop");
+    const outgoingEdges = pipeline.edges.filter((e) => e.from === stage.id && e.type !== "error");
 
     if (stage.type === "stage") {
       const enumValues = getDecisionEnumValues(action.outputSchema);

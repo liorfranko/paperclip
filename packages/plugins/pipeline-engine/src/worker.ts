@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   definePlugin,
   runWorker,
@@ -68,6 +71,33 @@ async function loadPipelines(ctx: PluginContext): Promise<PipelineDefinition[]> 
   }
 
   return loaded;
+}
+
+const BUNDLED_PIPELINES = ["autonomous-dev"];
+
+async function seedBundledPipelines(ctx: PluginContext): Promise<void> {
+  const registry = await getPipelineRegistry(ctx);
+  const workerDir = dirname(fileURLToPath(import.meta.url));
+  const pipelinesDir = resolve(workerDir, "..", "pipelines");
+
+  for (const name of BUNDLED_PIPELINES) {
+    if (registry.includes(name)) continue;
+    try {
+      const content = readFileSync(resolve(pipelinesDir, `${name}.json`), "utf8");
+      const pipeline = parsePipeline(content);
+      const validation = validateDAG(pipeline);
+      if (!validation.valid) {
+        ctx.logger.warn("Bundled pipeline invalid, skipping seed", { name, errors: validation.errors });
+        continue;
+      }
+      await ctx.state.set({ scopeKind: "instance", namespace: "pipeline", stateKey: `pipeline:${name}` }, content);
+      await ctx.state.set(PIPELINE_REGISTRY_KEY, [...registry, name]);
+      registry.push(name);
+      ctx.logger.info("Seeded bundled pipeline", { name });
+    } catch (err) {
+      ctx.logger.warn("Failed to seed bundled pipeline", { name, error: String(err) });
+    }
+  }
 }
 
 async function buildStageContext(
@@ -639,6 +669,7 @@ const plugin = definePlugin({
     dispatcher = new Dispatcher(ctx.issues as any, config.role_mapping ?? {}, ctx.manifest.id, ctx.agents as any);
     router = new Router();
 
+    await seedBundledPipelines(ctx);
     pipelines = await loadPipelines(ctx);
     triggerMatcher = new TriggerMatcher(pipelines);
 

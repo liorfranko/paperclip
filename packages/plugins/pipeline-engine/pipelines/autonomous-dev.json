@@ -1,0 +1,101 @@
+{
+  "name": "autonomous-dev",
+  "description": "Full autonomous development pipeline — triage → validate → plan → implement → review → validate → merge",
+  "trigger": { "label": "pipeline:autonomous-dev" },
+  "stages": [
+    { "id": "triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
+    { "id": "bug-triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
+    { "id": "fast-track-triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
+    { "id": "valid-scenario", "type": "stage", "agent_role": "pipe-generic", "actionId": "validate-scenario" },
+    { "id": "escalate-scenario", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "valid-spec", "type": "stage", "agent_role": "pipe-generic", "actionId": "validate-spec" },
+    { "id": "escalate-spec", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "plan-tasks", "type": "fan_out", "agent_role": "pipe-generic", "actionId": "plan-tasks" },
+    { "id": "write-backend-tests", "type": "stage", "agent_role": "pipe-backend", "actionId": "write-tests" },
+    { "id": "write-backend-impl", "type": "stage", "agent_role": "pipe-backend", "actionId": "write-implementation" },
+    { "id": "de-slop-backend", "type": "stage", "agent_role": "pipe-backend", "actionId": "de-slop-verify" },
+    { "id": "write-frontend-tests", "type": "stage", "agent_role": "pipe-frontend", "actionId": "write-tests" },
+    { "id": "write-frontend-impl", "type": "stage", "agent_role": "pipe-frontend", "actionId": "write-implementation" },
+    { "id": "de-slop-frontend", "type": "stage", "agent_role": "pipe-frontend", "actionId": "de-slop-verify" },
+    { "id": "open-pr", "type": "fan_in" },
+    { "id": "dispatch-reviews", "type": "fan_out", "actionId": "dispatch-code-reviews" },
+    { "id": "review-clean-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
+    { "id": "review-typed-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
+    { "id": "review-simplify", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
+    { "id": "critical-findings", "type": "fan_in" },
+    { "id": "evaluate-findings", "type": "stage", "agent_role": "pipe-generic", "actionId": "evaluate-critical-findings" },
+    { "id": "escalate-retries", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "scenario-validator", "type": "stage", "agent_role": "pipe-validator", "actionId": "validate-scenario-result" },
+    { "id": "escalate-validation", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "merge", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "merge-pr" }
+  ],
+  "edges": [
+    { "id": "e-triage-bug", "from": "triage", "to": "bug-triage", "sourceHandle": "bug" },
+    { "id": "e-triage-feature", "from": "triage", "to": "valid-scenario", "sourceHandle": "feature" },
+    { "id": "e-triage-fast", "from": "triage", "to": "fast-track-triage", "sourceHandle": "fast-track" },
+
+    { "id": "e-scenario-yes", "from": "valid-scenario", "to": "valid-spec", "sourceHandle": "yes" },
+    { "id": "e-scenario-no", "from": "valid-scenario", "to": "escalate-scenario", "sourceHandle": "no" },
+
+    { "id": "e-spec-yes", "from": "valid-spec", "to": "plan-tasks", "sourceHandle": "yes" },
+    { "id": "e-spec-no", "from": "valid-spec", "to": "escalate-spec", "sourceHandle": "no" },
+
+    { "id": "e-plan-backend", "from": "plan-tasks", "to": "write-backend-tests", "activationKey": "backend" },
+    { "id": "e-plan-frontend", "from": "plan-tasks", "to": "write-frontend-tests", "activationKey": "frontend" },
+
+    { "id": "e-be-tests-impl", "from": "write-backend-tests", "to": "write-backend-impl", "sourceHandle": "done" },
+    { "id": "e-be-impl-deslop", "from": "write-backend-impl", "to": "de-slop-backend", "sourceHandle": "done" },
+    { "id": "e-be-deslop-pr", "from": "de-slop-backend", "to": "open-pr", "sourceHandle": "done" },
+
+    { "id": "e-fe-tests-impl", "from": "write-frontend-tests", "to": "write-frontend-impl", "sourceHandle": "done" },
+    { "id": "e-fe-impl-deslop", "from": "write-frontend-impl", "to": "de-slop-frontend", "sourceHandle": "done" },
+    { "id": "e-fe-deslop-pr", "from": "de-slop-frontend", "to": "open-pr", "sourceHandle": "done" },
+
+    { "id": "e-pr-reviews", "from": "open-pr", "to": "dispatch-reviews" },
+
+    { "id": "e-reviews-clean", "from": "dispatch-reviews", "to": "review-clean-code", "activationKey": "clean-code" },
+    { "id": "e-reviews-typed", "from": "dispatch-reviews", "to": "review-typed-code", "activationKey": "typed-code" },
+    { "id": "e-reviews-simplify", "from": "dispatch-reviews", "to": "review-simplify", "activationKey": "simplify" },
+
+    { "id": "e-clean-findings", "from": "review-clean-code", "to": "critical-findings", "sourceHandle": "done" },
+    { "id": "e-typed-findings", "from": "review-typed-code", "to": "critical-findings", "sourceHandle": "done" },
+    { "id": "e-simplify-findings", "from": "review-simplify", "to": "critical-findings", "sourceHandle": "done" },
+
+    { "id": "e-findings-evaluate", "from": "critical-findings", "to": "evaluate-findings" },
+
+    { "id": "e-findings-no", "from": "evaluate-findings", "to": "scenario-validator", "sourceHandle": "no-findings" },
+    { "id": "e-findings-backend", "from": "evaluate-findings", "to": "write-backend-tests", "sourceHandle": "yes-backend", "type": "loop", "max_iterations": 3 },
+    { "id": "e-findings-frontend", "from": "evaluate-findings", "to": "write-frontend-tests", "sourceHandle": "yes-frontend", "type": "loop", "max_iterations": 3 },
+    { "id": "e-findings-max", "from": "evaluate-findings", "to": "escalate-retries", "sourceHandle": "max-retries" },
+
+    { "id": "e-validator-valid", "from": "scenario-validator", "to": "merge", "sourceHandle": "valid" },
+    { "id": "e-validator-invalid", "from": "scenario-validator", "to": "escalate-validation", "sourceHandle": "not-valid" }
+  ],
+  "positions": {
+    "triage": { "x": 400, "y": 0 },
+    "bug-triage": { "x": 150, "y": 120 },
+    "valid-scenario": { "x": 400, "y": 120 },
+    "fast-track-triage": { "x": 650, "y": 120 },
+    "escalate-scenario": { "x": 650, "y": 240 },
+    "valid-spec": { "x": 400, "y": 240 },
+    "escalate-spec": { "x": 650, "y": 360 },
+    "plan-tasks": { "x": 400, "y": 360 },
+    "write-backend-tests": { "x": 250, "y": 500 },
+    "write-backend-impl": { "x": 250, "y": 620 },
+    "de-slop-backend": { "x": 250, "y": 740 },
+    "write-frontend-tests": { "x": 550, "y": 500 },
+    "write-frontend-impl": { "x": 550, "y": 620 },
+    "de-slop-frontend": { "x": 550, "y": 740 },
+    "open-pr": { "x": 400, "y": 860 },
+    "dispatch-reviews": { "x": 400, "y": 960 },
+    "review-clean-code": { "x": 200, "y": 1060 },
+    "review-typed-code": { "x": 400, "y": 1060 },
+    "review-simplify": { "x": 600, "y": 1060 },
+    "critical-findings": { "x": 400, "y": 1180 },
+    "evaluate-findings": { "x": 400, "y": 1280 },
+    "escalate-retries": { "x": 650, "y": 1280 },
+    "scenario-validator": { "x": 400, "y": 1400 },
+    "escalate-validation": { "x": 650, "y": 1400 },
+    "merge": { "x": 400, "y": 1520 }
+  }
+}

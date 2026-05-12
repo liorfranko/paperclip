@@ -98,6 +98,90 @@ export const ACTIONS: readonly Action[] = [
       },
     },
   },
+  {
+    id: "write-tests",
+    name: "Write Tests",
+    type: "single-decision",
+    instructions: "Write comprehensive tests for the implementation task. Follow TDD principles — write failing tests that cover the expected behavior, edge cases, and error paths. Output 'done' when tests are written.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "write-implementation",
+    name: "Write Implementation",
+    type: "single-decision",
+    instructions: "Implement the feature or fix according to the spec and make all tests pass. Follow existing code conventions and patterns. Output 'done' when implementation is complete and tests pass.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "de-slop-verify",
+    name: "De-slop Verify",
+    type: "single-decision",
+    instructions: "Review the implementation for AI slop — unnecessary comments, over-engineering, dead code, verbose abstractions, and deviations from project conventions. Clean up and verify quality. Output 'done' when verified.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "open-pr",
+    name: "Open PR",
+    type: "single-decision",
+    instructions: "Create a pull request with the implementation. Write a clear title and description summarizing the changes, test plan, and any relevant context. Output 'done' when PR is opened.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "code-review",
+    name: "Code Review",
+    type: "single-decision",
+    instructions: "Review the pull request code changes for the assigned dimension (clean code, type safety, or simplification). Report findings with severity levels. Output 'done' when review is complete.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "merge-pr",
+    name: "Merge PR",
+    type: "single-decision",
+    instructions: "Merge the pull request after all reviews and validations have passed. Ensure CI is green and no blocking comments remain. Output 'done' when merged.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
+    id: "escalate-to-human",
+    name: "Escalate to Human",
+    type: "single-decision",
+    instructions: "Escalate this issue to a human operator. Provide a summary of why escalation is needed, what was attempted, and what decision is required.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["escalated"] },
+      },
+    },
+  },
 ];
 
 export function getActionsForType(type: ActionType): Action[] {
