@@ -199,22 +199,6 @@ describe("state-machine", () => {
     });
 
     it("releases the advisory lock for the run", async () => {
-      // Simulate PG advisory lock: first call acquires, second fails, after unlock re-acquires
-      const lockedKeys = new Set<string>();
-      db.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        const key = params?.[0] as string;
-        if (sql.includes("pg_try_advisory_lock")) {
-          if (lockedKeys.has(key)) return [{ locked: false }];
-          lockedKeys.add(key);
-          return [{ locked: true }];
-        }
-        if (sql.includes("pg_advisory_unlock")) {
-          lockedKeys.delete(key);
-          return [{ unlocked: true }];
-        }
-        return [];
-      });
-
       // Acquire a lock first
       const firstLock = await sm.tryAdvisoryLock("run-1");
       expect(firstLock).toBe(true);

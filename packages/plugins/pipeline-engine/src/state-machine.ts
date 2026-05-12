@@ -17,19 +17,20 @@ export class StateMachine {
     return `${this.db.namespace}.${name}`;
   }
 
+  private activeLocks = new Map<string, number>();
+  private static LOCK_TTL_MS = 60_000;
+
   async tryAdvisoryLock(runId: string): Promise<boolean> {
-    const rows = await this.db.query<{ locked: boolean }>(
-      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
-      [runId],
-    );
-    return rows[0]?.locked ?? false;
+    const existing = this.activeLocks.get(runId);
+    if (existing && Date.now() - existing < StateMachine.LOCK_TTL_MS) {
+      return false;
+    }
+    this.activeLocks.set(runId, Date.now());
+    return true;
   }
 
   async releaseAdvisoryLock(runId: string): Promise<void> {
-    await this.db.query(
-      `SELECT pg_advisory_unlock(hashtext($1))`,
-      [runId],
-    );
+    this.activeLocks.delete(runId);
   }
 
   async getLoopEdgeCounts(runId: string): Promise<Record<string, number>> {
