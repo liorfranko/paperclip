@@ -572,13 +572,6 @@ async function handleStageFailure(
     return;
   }
 
-  // Find error edge targets to determine target stage for retry
-  const errorEdges = (pipeline.edges ?? []).filter((e) => e.from === stageDef.id && e.type === "error");
-  const targetStageId = errorEdges.length > 0 ? errorEdges[0].to : undefined;
-  const targetRow = targetStageId
-    ? stageRows.find((s) => s.stageId === targetStageId)
-    : undefined;
-
   const failureAction = router.evaluateFailure(pipeline, stageDef.id);
 
   if (failureAction.action === "escalate") {
@@ -587,7 +580,7 @@ async function handleStageFailure(
     if (run) {
       await ctx.issues.createComment(
         run.parentIssueId,
-        `Pipeline escalated: stage "${stageDef.id}" failed after ${(targetRow ?? stageRow).retryCount} retries.`,
+        `Pipeline escalated: stage "${stageDef.id}" failed after ${stageRow.retryCount} retries.`,
         companyId,
         {},
       );
@@ -613,10 +606,8 @@ async function handleStageFailure(
 
   await stateMachine.incrementRetryCount(gotoTargetRow.id);
 
-  // Build adjacency from forward edges for downstream reset
   const adjacency = buildAdjacencyFromEdges(pipeline.edges ?? []);
-  const allStageIds = pipeline.stages.map((s) => s.id);
-  await stateMachine.resetDownstreamStages(runId, failureAction.targetStageId, allStageIds, adjacency);
+  await stateMachine.resetDownstreamStages(runId, failureAction.targetStageId, adjacency);
 
   const run = await stateMachine.getRun(runId);
   if (!run) return;

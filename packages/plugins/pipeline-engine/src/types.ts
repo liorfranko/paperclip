@@ -92,12 +92,6 @@ export interface PipelineEngineConfig {
   trigger_labels: Record<string, string>;
 }
 
-export interface ExpressionContext {
-  stages: Record<string, { output: Record<string, unknown> | null; status: StageStatus; retry_count: number }>;
-  pipeline: { name: string; version: number; parent_issue_id: string };
-  env: { company_id: string };
-}
-
 export interface DispatchRequest {
   pipelineRunId: string;
   stage: StageDefinition;
