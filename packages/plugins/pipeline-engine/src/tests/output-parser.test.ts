@@ -1,14 +1,25 @@
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, it, expect, beforeAll } from "vitest";
-import { extractOutput, loadSchema, setSchemasDir, validateOutput } from "../output-parser.js";
+import { describe, it, expect } from "vitest";
+import { extractOutput, validateOutput } from "../output-parser.js";
+
+const validationSchema = {
+  type: "object",
+  properties: {
+    status: { type: "string", enum: ["pass", "fail"] },
+    test_results: {
+      type: "object",
+      properties: {
+        passed: { type: "number" },
+        failed: { type: "number" },
+        skipped: { type: "number" },
+      },
+    },
+    lint_status: { type: "string", enum: ["pass", "fail"] },
+    type_check_status: { type: "string", enum: ["pass", "fail"] },
+  },
+  required: ["status"],
+};
 
 describe("output-parser", () => {
-  beforeAll(() => {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    setSchemasDir(resolve(__dirname, "../../schemas"));
-  });
-
   describe("extractOutput", () => {
     it("extracts JSON from sentinel-marked comment", () => {
       const body = `Some discussion here.
@@ -58,22 +69,20 @@ Some more text.`;
 
   describe("validateOutput", () => {
     it("validates against schema", () => {
-      const schema = loadSchema("validation-output");
       const data = {
         status: "pass",
         test_results: { passed: 5, failed: 0, skipped: 0 },
         lint_status: "pass",
         type_check_status: "pass",
       };
-      const result = validateOutput(data, schema);
+      const result = validateOutput(data, validationSchema);
       expect(result.valid).toBe(true);
     });
 
     it("rejects invalid data with type errors", () => {
-      const schema = loadSchema("validation-output");
       // status must be string, passing a number triggers a type error
       const data = { status: 12345, lint_status: false } as unknown as Record<string, unknown>;
-      const result = validateOutput(data, schema);
+      const result = validateOutput(data, validationSchema);
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error).toBeDefined();

@@ -4,30 +4,25 @@ export type StageStatus = "pending" | "running" | "completed" | "failed" | "skip
 
 export type StageType = "stage" | "fan_out" | "fan_in" | "sub-pipeline";
 
-export type FanInStrategy = "all_complete" | "first_complete" | "n_of_m";
-
 interface BaseStage {
   id: string;
+  checkpoint?: boolean;
 }
 
 export interface Stage extends BaseStage {
   type: "stage";
   agent_role: string;
-  instructions?: string;
-  output_schema?: string;
+  actionId: string;
 }
 
 export interface FanOutStage extends BaseStage {
   type: "fan_out";
   agent_role?: string;
-  instructions?: string;
-  per_task?: boolean;
-  ordering?: string;
+  actionId: string;
 }
 
 export interface FanInStage extends BaseStage {
   type: "fan_in";
-  fan_in_strategy: FanInStrategy;
 }
 
 export interface SubPipelineStage extends BaseStage {

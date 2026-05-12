@@ -1,3 +1,4 @@
+import { getActionById } from "./action-registry.js";
 import { getIncomingEdges, getErrorEdges, getRootStageIds, getLoopEdges } from "./edge-utils.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "./types.js";
 
@@ -58,9 +59,7 @@ export class Router {
 
       if (incomingEdges.length === 0) continue;
 
-      // Determine fan_in strategy
-      const fanInStrategy = stageDef.type === "fan_in" ? stageDef.fan_in_strategy : undefined;
-      const useFirstComplete = fanInStrategy === "first_complete";
+      // fan_in: all_complete is the only strategy
 
       // Evaluate which source stages have completed and which edges are satisfied
       const satisfiedEdges: EdgeDefinition[] = [];
@@ -108,16 +107,9 @@ export class Router {
         }
       }
 
-      if (useFirstComplete) {
-        // Ready if any satisfied edge exists
-        if (satisfiedEdges.length > 0) {
-          ready.push(stageDef);
-        }
-      } else {
-        // all_complete (default): all incoming edges must be satisfied
-        if (allSourcesResolved && satisfiedEdges.length === incomingEdges.length) {
-          ready.push(stageDef);
-        }
+      // all_complete: all incoming edges must be satisfied
+      if (allSourcesResolved && satisfiedEdges.length === incomingEdges.length) {
+        ready.push(stageDef);
       }
     }
 
@@ -240,6 +232,46 @@ export class Router {
   }
 
   requiresAgentDispatch(stageDef: StageDefinition): boolean {
+    if (stageDef.type === "fan_out") {
+      const action = getActionById(stageDef.actionId);
+      if (action?.fixed) return false;
+    }
     return stageDef.type === "stage" || stageDef.type === "fan_out";
+  }
+
+  evaluateLoopOverflow(
+    pipeline: PipelineDefinition,
+    stageId: string,
+    _stageRow: PipelineStage,
+    loopEdgeCounts: Record<string, number>,
+  ): FailureAction | null {
+    const edges = pipeline.edges ?? [];
+    const loopEdgesFromStage = edges.filter(
+      (e) => e.from === stageId && e.type === "loop",
+    );
+
+    if (loopEdgesFromStage.length === 0) return null;
+
+    const overflowed = loopEdgesFromStage.some((e) => {
+      const count = loopEdgeCounts[e.id] ?? 0;
+      return count >= (e.max_iterations ?? 0);
+    });
+
+    if (!overflowed) return null;
+
+    const errorEdges = getErrorEdges(edges).filter((e) => e.from === stageId);
+    if (errorEdges.length === 0) {
+      return { action: "escalate" };
+    }
+
+    return { action: "goto", targetStageId: errorEdges[0].to };
+  }
+
+  getFixedFanoutOutput(stageDef: StageDefinition): Record<string, unknown> | null {
+    if (stageDef.type !== "fan_out") return null;
+    const action = getActionById(stageDef.actionId);
+    if (!action || !action.fixed) return null;
+    const tracks = action.outputSchema.properties?.tracks?.items?.enum ?? [];
+    return { tracks, ordering: "parallel" };
   }
 }

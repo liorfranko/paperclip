@@ -24,9 +24,9 @@ const loopPipeline: PipelineDefinition = {
   description: "",
   trigger: { label: "pipeline:loop" },
   stages: [
-    { id: "write-tests", type: "stage", agent_role: "test-writer" },
-    { id: "review", type: "stage", agent_role: "reviewer" },
-    { id: "escalate", type: "stage", agent_role: "lead" },
+    { id: "write-tests", type: "stage", agent_role: "test-writer", actionId: "triage-new-issues" },
+    { id: "review", type: "stage", agent_role: "reviewer", actionId: "triage-new-issues" },
+    { id: "escalate", type: "stage", agent_role: "lead", actionId: "triage-new-issues" },
   ],
   edges: [
     { id: "e1", from: "write-tests", to: "review" },

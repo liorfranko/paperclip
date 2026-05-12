@@ -11,14 +11,13 @@ import {
   type Edge,
   type Connection,
 } from "@xyflow/react";
-import { usePluginAction, usePluginData } from "@paperclipai/plugin-sdk/ui";
+import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { StagePalette } from "./StagePalette.js";
 import { StageNode, type StageNodeData } from "./StageNode.js";
 import { StageInspector } from "./StageInspector.js";
 import { useAutoLayout } from "../hooks/useAutoLayout.js";
-import { ACTION_KEYS, DATA_KEYS } from "../constants.js";
+import { ACTION_KEYS } from "../constants.js";
 import { validatePipeline, ValidationErrorsPanel, type ValidationError } from "./ValidationErrors.js";
-import { getDecisionEnumValues, type JsonSchema } from "../../schema-utils.js";
 import type { PipelineDefinition, StageDefinition, StageType, EdgeDefinition } from "../../types.js";
 
 const NODE_TYPES = { stage: StageNode };
@@ -43,11 +42,11 @@ function buildEdges(pipeline: PipelineDefinition): Edge[] {
 function stageDefaults(type: StageType, id: string): StageDefinition {
   switch (type) {
     case "stage":
-      return { id, type: "stage", agent_role: "" };
+      return { id, type: "stage", agent_role: "", actionId: "" };
     case "fan_out":
-      return { id, type: "fan_out" };
+      return { id, type: "fan_out", actionId: "" };
     case "fan_in":
-      return { id, type: "fan_in", fan_in_strategy: "all_complete" };
+      return { id, type: "fan_in" };
     case "sub-pipeline":
       return { id, type: "sub-pipeline", pipeline: "" };
   }
@@ -70,20 +69,6 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
   }, []);
 
   const savePipeline = usePluginAction(ACTION_KEYS.SAVE_PIPELINE);
-
-  // Fetch schema contents for decision enum values
-  const { data: schemaContents } = usePluginData<{ schemas: Record<string, JsonSchema> }>(
-    DATA_KEYS.LIST_SCHEMA_CONTENTS, {}
-  );
-
-  const decisionMap = useMemo(() => {
-    const map: Record<string, string[]> = {};
-    if (!schemaContents?.schemas) return map;
-    for (const [name, schema] of Object.entries(schemaContents.schemas)) {
-      map[name] = getDecisionEnumValues(schema);
-    }
-    return map;
-  }, [schemaContents]);
 
   // Local copies of pipeline metadata
   const [name, setName] = useState(pipeline.name);
@@ -110,17 +95,13 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
 
   // Build RF nodes/edges from canonical state
   const rfNodes = useMemo(() =>
-    stages.map((stage) => {
-      const schemaName = "output_schema" in stage ? stage.output_schema : undefined;
-      const decisionValues = schemaName ? decisionMap[schemaName] ?? [] : [];
-      return {
-        id: stage.id,
-        type: "stage" as const,
-        position: positions[stage.id] ?? { x: 0, y: 0 },
-        data: { stage, decisionValues, selected: stage.id === selectedStageId, onSelect: handleNodeSelect } as unknown as StageNodeData,
-      };
-    }),
-    [stages, positions, selectedStageId, handleNodeSelect, decisionMap],
+    stages.map((stage) => ({
+      id: stage.id,
+      type: "stage" as const,
+      position: positions[stage.id] ?? { x: 0, y: 0 },
+      data: { stage, selected: stage.id === selectedStageId, onSelect: handleNodeSelect } as unknown as StageNodeData,
+    })),
+    [stages, positions, selectedStageId, handleNodeSelect],
   );
 
   const rfEdges = useMemo<Edge[]>(() =>
@@ -232,7 +213,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
           id,
           type: "stage" as const,
           position: pos,
-          data: { stage: newStage, decisionValues: [], onSelect: handleNodeSelect } as unknown as StageNodeData,
+          data: { stage: newStage, onSelect: handleNodeSelect } as unknown as StageNodeData,
         } as unknown as Node,
       ]);
     },
@@ -271,12 +252,10 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
       setSelectedStageId(newId);
     }
 
-    const schemaName = "output_schema" in updated ? updated.output_schema : undefined;
-    const dv = schemaName ? decisionMap[schemaName] ?? [] : [];
     setNodes((nds) =>
       nds.map((n) =>
         n.id === prevId
-          ? ({ ...n, id: newId, data: { ...n.data, stage: updated, decisionValues: dv, onSelect: handleNodeSelect } as unknown as StageNodeData } as unknown as Node)
+          ? ({ ...n, id: newId, data: { ...n.data, stage: updated, onSelect: handleNodeSelect } as unknown as StageNodeData } as unknown as Node)
           : n,
       ),
     );
@@ -286,7 +265,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
         return { ...rest, [newId]: pos };
       });
     }
-  }, [setNodes, setEdges, handleNodeSelect, decisionMap]);
+  }, [setNodes, setEdges, handleNodeSelect]);
 
   const handleStageDelete = useCallback((id: string) => {
     setStages((prev) => prev.filter((s) => s.id !== id));
@@ -334,7 +313,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
 
   const handleSave = useCallback(async () => {
-    const errors = validatePipeline(name, stages, edgeDefs, decisionMap);
+    const errors = validatePipeline(name, stages, edgeDefs);
     if (errors.length > 0) {
       setValidationErrors(errors);
       return;

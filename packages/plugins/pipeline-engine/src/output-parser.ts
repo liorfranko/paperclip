@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ParsedOutput } from "./types.js";
 
@@ -37,7 +34,6 @@ function sanitizeJsonControlChars(raw: string): string {
 }
 
 const ajv = new (Ajv2020 as any)({ allErrors: true });
-const schemaCache = new Map<string, object>();
 
 export interface ExtractResult {
   found: boolean;
@@ -65,30 +61,6 @@ export function extractOutput(commentBody: string): ExtractResult {
       return { found: true, data: null, parseError: `JSON parse failed: ${(e as Error).message}` };
     }
   }
-}
-
-let schemasBaseDir: string | undefined;
-
-export function setSchemasDir(dir: string): void {
-  schemasBaseDir = dir;
-}
-
-export function loadSchema(schemaName: string): object {
-  if (schemaCache.has(schemaName)) return schemaCache.get(schemaName)!;
-
-  const baseDir = schemasBaseDir ?? resolve(dirname(fileURLToPath(import.meta.url)), "../schemas");
-  const schemaPath = resolve(baseDir, `${schemaName}.json`);
-
-  let content: string;
-  try {
-    content = readFileSync(schemaPath, "utf-8");
-  } catch (e) {
-    throw new Error(`Schema "${schemaName}" not found at ${schemaPath}. Check the output_schema field in your pipeline definition.`);
-  }
-
-  const schema = JSON.parse(content) as object;
-  schemaCache.set(schemaName, schema);
-  return schema;
 }
 
 export function validateOutput(

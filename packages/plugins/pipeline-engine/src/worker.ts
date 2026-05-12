@@ -1,18 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   definePlugin,
   runWorker,
   type PluginContext,
   type PluginEvent,
 } from "@paperclipai/plugin-sdk";
+import { getActionById } from "./action-registry.js";
 import { parsePipeline, validateDAG } from "./dag-parser.js";
 import { Dispatcher } from "./dispatcher.js";
 import { buildExpressionContext } from "./expression-engine.js";
 import { buildAdjacencyFromEdges, getForwardEdges } from "./edge-utils.js";
-import { extractOutput, loadSchema, validateOutput } from "./output-parser.js";
+import { extractOutput, validateOutput } from "./output-parser.js";
 import { Router } from "./router.js";
 import { StateMachine } from "./state-machine.js";
 import { TriggerMatcher } from "./trigger-matcher.js";
@@ -103,6 +101,12 @@ async function buildStageContext(
     if (upstreamOutputs.length > 0) {
       sections.push(`## Upstream Stage Results\n\n${upstreamOutputs.join("\n\n")}`);
     }
+  }
+
+  const actionId = "actionId" in stageDef ? stageDef.actionId : undefined;
+  const action = actionId ? getActionById(actionId) : undefined;
+  if (action?.instructions) {
+    sections.push(`## Task Instructions\n\n${action.instructions}`);
   }
 
   return sections.join("\n\n---\n\n");
@@ -308,6 +312,16 @@ async function advancePipeline(
           continue;
         }
 
+        const fixedOutput = router.getFixedFanoutOutput(stageDef);
+        if (fixedOutput) {
+          const claimed = await stateMachine.claimStageForDispatch(stageRow.id);
+          if (!claimed) continue;
+          await stateMachine.setStageOutput(stageRow.id, fixedOutput);
+          await stateMachine.updateStageStatus(stageRow.id, "completed");
+          ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
+          continue;
+        }
+
         if (!router.requiresAgentDispatch(stageDef)) {
           ctx.logger.warn("Stage type not dispatchable", { stageId: stageDef.id, type: stageDef.type });
           await stateMachine.updateStageStatus(stageRow.id, "failed");
@@ -421,21 +435,10 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
     return;
   }
 
-  const outputSchema = "output_schema" in stageDef ? stageDef.output_schema : undefined;
-  if (outputSchema) {
-    let schema: object;
-    try {
-      schema = loadSchema(outputSchema);
-    } catch (err) {
-      ctx.logger.error("Failed to load schema", { schema: outputSchema, error: String(err) });
-      await stateMachine.setStageError(stageRow.id, `Schema load failed: ${String(err)}`);
-      await stateMachine.updateStageStatus(stageRow.id, "failed");
-      ctx.streams.emit("run-progress", { runId: run.id, stageId: stageRow.stageId, status: "failed" });
-      await handleStageFailure(ctx, stageRow.pipelineRunId, pipeline, stageDef, stageRow.id, run.companyId);
-      return;
-    }
-
-    const validation = validateOutput(output, schema);
+  const actionId = "actionId" in stageDef ? stageDef.actionId : undefined;
+  const action = actionId ? getActionById(actionId) : undefined;
+  if (action?.outputSchema) {
+    const validation = validateOutput(output, action.outputSchema);
     if (!validation.valid) {
       await stateMachine.setStageError(stageRow.id, `malformed output: ${validation.error}`);
       await stateMachine.updateStageStatus(stageRow.id, "failed");
@@ -649,53 +652,6 @@ const plugin = definePlugin({
       if (!companyId) return { agents: [] };
       const agents = await ctx.agents.list({ companyId });
       return { agents };
-    });
-
-    ctx.data.register("list-schemas", async () => {
-      const candidates = [
-        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
-      ];
-      for (const dir of candidates) {
-        try {
-          const files = readdirSync(dir);
-          const schemas = files
-            .filter((f) => f.endsWith(".json"))
-            .map((f) => f.replace(/\.json$/, ""));
-          if (schemas.length > 0) return { schemas };
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-            ctx.logger.warn("Failed to read schemas directory", { dir, error: String(err) });
-          }
-        }
-      }
-      return { schemas: [] };
-    });
-
-    ctx.data.register("list-schema-contents", async () => {
-      const candidates = [
-        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
-      ];
-      for (const dir of candidates) {
-        try {
-          const files = readdirSync(dir);
-          const schemas: Record<string, unknown> = {};
-          for (const f of files) {
-            if (!f.endsWith(".json")) continue;
-            const content = readFileSync(resolve(dir, f), "utf-8");
-            schemas[f.replace(/\.json$/, "")] = JSON.parse(content);
-          }
-          if (Object.keys(schemas).length > 0) return { schemas };
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-            ctx.logger.warn("Failed to read schema contents", { dir, error: String(err) });
-          }
-        }
-      }
-      return { schemas: {} };
     });
 
     // Action handlers for UI
