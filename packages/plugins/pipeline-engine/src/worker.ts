@@ -163,13 +163,13 @@ async function handleIssueEvent(ctx: PluginContext, event: PluginEvent): Promise
 }
 
 async function resolveLabelNames(ctx: PluginContext, labelIds: string[], companyId: string): Promise<string[]> {
-  const mapping = await ctx.state.get({ scopeKind: "company", scopeId: companyId, stateKey: "label-name-map" });
-  if (!mapping || typeof mapping !== "object") {
-    ctx.logger.warn("Label name map not found or invalid", { companyId });
-    return [];
-  }
-  const map = mapping as Record<string, string>;
-  return labelIds.map((id) => map[id]).filter(Boolean);
+  if (labelIds.length === 0) return [];
+  const placeholders = labelIds.map((_, i) => `$${i + 1}`).join(", ");
+  const rows = await ctx.db.query<{ name: string }>(
+    `SELECT name FROM public.labels WHERE id IN (${placeholders}) AND company_id = $${labelIds.length + 1}`,
+    [...labelIds, companyId],
+  );
+  return rows.map((r) => r.name);
 }
 
 async function materializePipeline(

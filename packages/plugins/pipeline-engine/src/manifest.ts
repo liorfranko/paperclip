@@ -64,7 +64,7 @@ const manifest: PaperclipPluginManifestV1 = {
   database: {
     namespaceSlug: "pipeline_engine",
     migrationsDir: "migrations",
-    coreReadTables: ["issues"],
+    coreReadTables: ["issues", "labels"],
   },
   ui: {
     slots: [
