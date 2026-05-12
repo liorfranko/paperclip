@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -620,6 +620,27 @@ const plugin = definePlugin({
         } catch {}
       }
       return { schemas: [] };
+    });
+
+    ctx.data.register("list-schema-contents", async () => {
+      const candidates = [
+        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
+        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
+        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
+      ];
+      for (const dir of candidates) {
+        try {
+          const files = readdirSync(dir);
+          const schemas: Record<string, unknown> = {};
+          for (const f of files) {
+            if (!f.endsWith(".json")) continue;
+            const content = readFileSync(resolve(dir, f), "utf-8");
+            schemas[f.replace(/\.json$/, "")] = JSON.parse(content);
+          }
+          if (Object.keys(schemas).length > 0) return { schemas };
+        } catch {}
+      }
+      return { schemas: {} };
     });
 
     // Action handlers for UI
