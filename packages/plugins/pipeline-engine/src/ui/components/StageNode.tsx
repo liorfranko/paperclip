@@ -2,6 +2,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { StageDefinition, StageStatus } from "../../types.js";
 import { getActionById } from "../../action-registry.js";
 import { getDecisionEnumValues, getArrayFieldValues } from "../../schema-utils.js";
+import { getStageColor, getStageBadge } from "../stage-type-meta.js";
 
 export interface StageNodeData {
   stage: StageDefinition;
@@ -9,20 +10,6 @@ export interface StageNodeData {
   subtitle?: string;
   onSelect?: (id: string) => void;
 }
-
-const TYPE_COLORS: Record<string, string> = {
-  stage: "#3b82f6",
-  fan_out: "#06b6d4",
-  fan_in: "#8b5cf6",
-  "sub-pipeline": "#22c55e",
-};
-
-const TYPE_BADGES: Record<string, string> = {
-  stage: "STG",
-  fan_out: "FAN",
-  fan_in: "FIN",
-  "sub-pipeline": "SUB",
-};
 
 function getBorderStyle(status: StageStatus | undefined): string {
   switch (status) {
@@ -51,8 +38,8 @@ export function StageNode({ data, selected, id }: NodeProps) {
     : [];
   const instructions = action?.instructions;
   const hasDecisionHandles = decisionValues && decisionValues.length > 0;
-  const typeColor = TYPE_COLORS[stage.type] ?? "#6b7280";
-  const badge = TYPE_BADGES[stage.type] ?? "???";
+  const typeColor = getStageColor(stage.type);
+  const badge = getStageBadge(stage.type);
   const border = getBorderStyle(status);
 
   return (

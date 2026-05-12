@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   getIncomingEdges,
-  getOutgoingEdges,
   getForwardEdges,
   getErrorEdges,
   buildAdjacencyFromEdges,
@@ -32,19 +31,6 @@ describe("edge-utils", () => {
     it("returns empty array for a stage with no incoming edges", () => {
       const incoming = getIncomingEdges("start", edges);
       expect(incoming).toHaveLength(0);
-    });
-  });
-
-  describe("getOutgoingEdges", () => {
-    it("returns all edges from the given stage including error edges", () => {
-      const outgoing = getOutgoingEdges("middle", edges);
-      expect(outgoing).toHaveLength(2);
-      expect(outgoing.map((e) => e.id).sort()).toEqual(["e2", "e3"]);
-    });
-
-    it("returns empty array for a stage with no outgoing edges", () => {
-      const outgoing = getOutgoingEdges("finish", edges);
-      expect(outgoing).toHaveLength(0);
     });
   });
 

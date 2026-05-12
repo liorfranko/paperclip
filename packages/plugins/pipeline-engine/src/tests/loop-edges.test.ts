@@ -78,7 +78,7 @@ describe("loop edges", () => {
         makeStage("review", "completed", { decision: "fail" }),
         makeStage("escalate", "pending"),
       ];
-      const ready = await router.getReadyStages(loopPipeline, stages, "co-1", { "e-loop": 0 });
+      const ready = await router.getReadyStages(loopPipeline, stages, { "e-loop": 0 });
       expect(ready.map((s) => s.id)).toContain("write-tests");
     });
 
@@ -88,7 +88,7 @@ describe("loop edges", () => {
         makeStage("review", "completed", { decision: "fail" }),
         makeStage("escalate", "pending"),
       ];
-      const ready = await router.getReadyStages(loopPipeline, stages, "co-1", { "e-loop": 3 });
+      const ready = await router.getReadyStages(loopPipeline, stages, { "e-loop": 3 });
       expect(ready.map((s) => s.id)).not.toContain("write-tests");
     });
 

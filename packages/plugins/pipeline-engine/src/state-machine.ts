@@ -144,17 +144,15 @@ export class StateMachine {
     );
   }
 
-  private getDownstreamStageIds(afterStageId: string, allStageIds: string[], adjacency: Map<string, string[]>): string[] {
+  private getDownstreamStageIds(afterStageId: string, _allStageIds: string[], adjacency: Map<string, string[]>): string[] {
     const downstream = new Set<string>();
     const queue = [afterStageId];
     while (queue.length > 0) {
       const current = queue.shift()!;
-      for (const stageId of allStageIds) {
-        if (downstream.has(stageId)) continue;
-        const deps = adjacency.get(stageId) ?? [];
-        if (deps.includes(current)) {
-          downstream.add(stageId);
-          queue.push(stageId);
+      for (const successor of adjacency.get(current) ?? []) {
+        if (!downstream.has(successor)) {
+          downstream.add(successor);
+          queue.push(successor);
         }
       }
     }
@@ -225,7 +223,7 @@ export class StateMachine {
     };
   }
 
-  async getStageBySubIssueId(subIssueId: string): Promise<(PipelineStage & { pipelineRunId: string }) | null> {
+  async getStageBySubIssueId(subIssueId: string): Promise<PipelineStage | null> {
     const rows = await this.db.query<{
       id: string;
       pipeline_run_id: string;

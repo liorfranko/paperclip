@@ -16,12 +16,11 @@ interface ListAgentsResult {
 
 interface EdgeInspectorProps {
   edge: Edge;
-  stageIds: string[];
   onUpdate: (id: string, changes: Partial<{ label: string; sourceHandle: string; type: "default" | "error" | "loop"; activationKey: string; max_iterations: number }>) => void;
   onDelete: (id: string) => void;
 }
 
-function EdgeInspector({ edge, stageIds, onUpdate, onDelete }: EdgeInspectorProps) {
+function EdgeInspector({ edge, onUpdate, onDelete }: EdgeInspectorProps) {
   const data = (edge.data ?? {}) as { sourceHandle?: string; type?: "default" | "error" | "loop"; activationKey?: string; max_iterations?: number };
 
   return (
@@ -94,13 +93,11 @@ interface StageFormProps {
   stage: StageDefinition;
   agents: AgentItem[];
   pipelineNames: string[];
-  stageIds: string[];
-  upstreamStageIds: string[];
   onChange: (updated: StageDefinition, oldId?: string) => void;
   onDelete: (id: string) => void;
 }
 
-function StageForm({ stage, agents, pipelineNames, stageIds, upstreamStageIds, onChange, onDelete }: StageFormProps) {
+function StageForm({ stage, agents, pipelineNames, onChange, onDelete }: StageFormProps) {
   const update = (patch: Partial<StageDefinition>) =>
     onChange({ ...stage, ...patch } as StageDefinition, patch.id !== undefined ? stage.id : undefined);
 
@@ -249,8 +246,6 @@ function StageForm({ stage, agents, pipelineNames, stageIds, upstreamStageIds, o
 export interface StageInspectorProps {
   selectedStage: StageDefinition | null;
   selectedEdge: Edge | null;
-  stageIds: string[];
-  edges: { from: string; to: string }[];
   currentPipelineName: string;
   onStageChange: (updated: StageDefinition, oldId?: string) => void;
   onStageDelete: (id: string) => void;
@@ -261,8 +256,6 @@ export interface StageInspectorProps {
 export function StageInspector({
   selectedStage,
   selectedEdge,
-  stageIds,
-  edges: edgeDefs,
   currentPipelineName,
   onStageChange,
   onStageDelete,
@@ -289,14 +282,12 @@ export function StageInspector({
       }}
     >
       {selectedEdge ? (
-        <EdgeInspector edge={selectedEdge} stageIds={stageIds} onUpdate={onEdgeUpdate} onDelete={onEdgeDelete} />
+        <EdgeInspector edge={selectedEdge} onUpdate={onEdgeUpdate} onDelete={onEdgeDelete} />
       ) : selectedStage ? (
         <StageForm
           stage={selectedStage}
           agents={agents}
           pipelineNames={pipelineNames}
-          stageIds={stageIds}
-          upstreamStageIds={edgeDefs.filter((e) => e.to === selectedStage.id).map((e) => e.from)}
           onChange={onStageChange}
           onDelete={onStageDelete}
         />

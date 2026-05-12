@@ -8,12 +8,6 @@ export function getIncomingEdges(stageId: string, edges: EdgeDefinition[]): Edge
   return edges.filter((e) => e.to === stageId && e.type !== "error");
 }
 
-/**
- * Returns all edges whose source is the given stage.
- */
-export function getOutgoingEdges(stageId: string, edges: EdgeDefinition[]): EdgeDefinition[] {
-  return edges.filter((e) => e.from === stageId);
-}
 
 /**
  * Returns all edges that are not error or loop edges.

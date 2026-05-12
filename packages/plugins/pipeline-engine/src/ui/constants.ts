@@ -4,14 +4,11 @@ export const DATA_KEYS = {
   LIST_RUNS: "list-runs",
   GET_RUN: "get-run",
   LIST_AGENTS: "list-agents",
-  LIST_SCHEMAS: "list-schemas",
-  LIST_SCHEMA_CONTENTS: "list-schema-contents",
 } as const;
 
 export const ACTION_KEYS = {
   SAVE_PIPELINE: "save-pipeline",
   DELETE_PIPELINE: "delete-pipeline",
-  TRIGGER_RUN: "trigger-run",
   CANCEL_RUN: "cancel-run",
 } as const;
 

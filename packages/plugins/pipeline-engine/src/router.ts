@@ -6,7 +6,6 @@ export class Router {
   async getReadyStages(
     pipeline: PipelineDefinition,
     stageRows: PipelineStage[],
-    companyId: string,
     loopEdgeCounts?: Record<string, number>,
   ): Promise<StageDefinition[]> {
     const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
@@ -112,11 +111,7 @@ export class Router {
         }
       }
 
-      const hasConditionalEdges = incomingEdges.some((e) => e.sourceHandle || e.activationKey);
-
       if (allSourcesResolved && allUnconditionalSatisfied && hasAnySatisfiedEdge) {
-        ready.push(stageDef);
-      } else if (allSourcesResolved && !hasConditionalEdges && allUnconditionalSatisfied && incomingEdges.length > 0) {
         ready.push(stageDef);
       }
     }
@@ -147,7 +142,6 @@ export class Router {
   async getSkippedStages(
     pipeline: PipelineDefinition,
     stageRows: PipelineStage[],
-    companyId: string,
     loopEdgeCounts?: Record<string, number>,
   ): Promise<StageDefinition[]> {
     const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
@@ -221,8 +215,6 @@ export class Router {
   evaluateFailure(
     pipeline: PipelineDefinition,
     failedStageId: string,
-    stageRow: PipelineStage,
-    targetStageRow?: PipelineStage,
   ): FailureAction {
     const edges = pipeline.edges ?? [];
     const errorEdgesFromFailed = getErrorEdges(edges).filter((e) => e.from === failedStageId);
@@ -250,7 +242,6 @@ export class Router {
   evaluateLoopOverflow(
     pipeline: PipelineDefinition,
     stageId: string,
-    _stageRow: PipelineStage,
     loopEdgeCounts: Record<string, number>,
   ): FailureAction | null {
     const edges = pipeline.edges ?? [];

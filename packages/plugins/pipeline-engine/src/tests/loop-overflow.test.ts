@@ -1,21 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Router } from "../router.js";
-import type { PipelineDefinition, PipelineStage, StageStatus } from "../types.js";
-
-function makeStage(stageId: string, status: StageStatus, output?: Record<string, unknown>): PipelineStage {
-  return {
-    id: `row-${stageId}`,
-    pipelineRunId: "run-1",
-    stageId,
-    subIssueId: null,
-    status,
-    retryCount: 0,
-    output: output ?? null,
-    error: null,
-    startedAt: null,
-    completedAt: null,
-  };
-}
+import type { PipelineDefinition } from "../types.js";
 
 const overflowPipeline: PipelineDefinition = {
   name: "overflow-test",
@@ -38,22 +23,19 @@ describe("loop overflow routing", () => {
   const router = new Router();
 
   it("fires error edge when loop max_iterations exceeded", () => {
-    const stageRow = makeStage("review", "completed", { decision: "yes-backend" });
     const loopEdgeCounts = { "e-loop": 2 };
-    const action = router.evaluateLoopOverflow(overflowPipeline, "review", stageRow, loopEdgeCounts);
+    const action = router.evaluateLoopOverflow(overflowPipeline, "review", loopEdgeCounts);
     expect(action).toEqual({ action: "goto", targetStageId: "escalate" });
   });
 
   it("returns null when loop is not overflowed", () => {
-    const stageRow = makeStage("review", "completed", { decision: "yes-backend" });
     const loopEdgeCounts = { "e-loop": 1 };
-    const action = router.evaluateLoopOverflow(overflowPipeline, "review", stageRow, loopEdgeCounts);
+    const action = router.evaluateLoopOverflow(overflowPipeline, "review", loopEdgeCounts);
     expect(action).toBeNull();
   });
 
   it("returns null when no loop edges exist from stage", () => {
-    const stageRow = makeStage("fix", "completed", {});
-    const action = router.evaluateLoopOverflow(overflowPipeline, "fix", stageRow, {});
+    const action = router.evaluateLoopOverflow(overflowPipeline, "fix", {});
     expect(action).toBeNull();
   });
 
@@ -72,8 +54,7 @@ describe("loop overflow routing", () => {
       ],
       positions: {},
     };
-    const stageRow = makeStage("check", "completed", {});
-    const action = router.evaluateLoopOverflow(noErrorPipeline, "check", stageRow, { "e-loop": 1 });
+    const action = router.evaluateLoopOverflow(noErrorPipeline, "check", { "e-loop": 1 });
     expect(action).toEqual({ action: "escalate" });
   });
 });

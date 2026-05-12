@@ -192,10 +192,3 @@ export function getActionById(id: string): Action | undefined {
   return ACTIONS.find((a) => a.id === id);
 }
 
-export function getActionByIdOrThrow(id: string): Action {
-  const action = ACTIONS.find((a) => a.id === id);
-  if (!action) {
-    throw new Error(`ACTION_NOT_FOUND: action "${id}" does not exist in the predefined registry`);
-  }
-  return action;
-}

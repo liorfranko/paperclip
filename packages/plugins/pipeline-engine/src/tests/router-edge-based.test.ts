@@ -42,7 +42,7 @@ describe("router (edge-based)", () => {
   describe("getReadyStages", () => {
     it("returns root stages when nothing has run", async () => {
       const stages = [makeStage("spec-review", "pending")];
-      const ready = await router.getReadyStages(featurePipeline, stages, "company-1");
+      const ready = await router.getReadyStages(featurePipeline, stages);
       expect(ready.map((s) => s.id)).toContain("spec-review");
     });
 
@@ -53,7 +53,7 @@ describe("router (edge-based)", () => {
         makeStage("implement", "pending"),
         makeStage("validate", "pending"),
       ];
-      const ready = await router.getReadyStages(featurePipeline, stages, "company-1");
+      const ready = await router.getReadyStages(featurePipeline, stages);
       expect(ready.map((s) => s.id)).toContain("implement");
     });
 
@@ -62,7 +62,7 @@ describe("router (edge-based)", () => {
         makeStage("spec-review", "completed", { decision: "approved" }),
         makeStage("decompose", "pending"),
       ];
-      const ready = await router.getReadyStages(featurePipeline, stages, "company-1");
+      const ready = await router.getReadyStages(featurePipeline, stages);
       expect(ready.map((s) => s.id)).toContain("decompose");
     });
 
@@ -71,13 +71,13 @@ describe("router (edge-based)", () => {
         makeStage("spec-review", "completed", { decision: "rejected" }),
         makeStage("decompose", "pending"),
       ];
-      const ready = await router.getReadyStages(featurePipeline, stages, "company-1");
+      const ready = await router.getReadyStages(featurePipeline, stages);
       expect(ready.map((s) => s.id)).not.toContain("decompose");
     });
 
     it("does not return already-running stages", async () => {
       const stages = [makeStage("spec-review", "running")];
-      const ready = await router.getReadyStages(featurePipeline, stages, "company-1");
+      const ready = await router.getReadyStages(featurePipeline, stages);
       expect(ready).toHaveLength(0);
     });
 
@@ -94,7 +94,7 @@ describe("router (edge-based)", () => {
         makeStage("start", "completed"),
         makeStage("sub", "pending"),
       ];
-      const ready = await router.getReadyStages(pipelineWithSubPipeline, stages, "company-1");
+      const ready = await router.getReadyStages(pipelineWithSubPipeline, stages);
       expect(ready.map((s) => s.id)).not.toContain("sub");
     });
 
@@ -119,7 +119,7 @@ describe("router (edge-based)", () => {
         makeStage("b", "pending"),
         makeStage("join", "pending"),
       ];
-      const ready = await router.getReadyStages(fanPipeline, stages, "company-1");
+      const ready = await router.getReadyStages(fanPipeline, stages);
       expect(ready.map((s) => s.id)).not.toContain("join");
     });
 
@@ -149,7 +149,7 @@ describe("router (edge-based)", () => {
         makeStage("bug-work", "skipped"),
         makeStage("merge", "pending"),
       ];
-      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages);
       expect(ready.map((s) => s.id)).toContain("merge");
     });
 
@@ -178,7 +178,7 @@ describe("router (edge-based)", () => {
         makeStage("bug-work", "pending"),
         makeStage("merge", "pending"),
       ];
-      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages);
       expect(ready.map((s) => s.id)).not.toContain("merge");
     });
   });
@@ -189,7 +189,7 @@ describe("router (edge-based)", () => {
         makeStage("spec-review", "completed", { decision: "rejected" }),
         makeStage("decompose", "pending"),
       ];
-      const skipped = await router.getSkippedStages(featurePipeline, stages, "company-1");
+      const skipped = await router.getSkippedStages(featurePipeline, stages);
       expect(skipped.map((s) => s.id)).toContain("decompose");
     });
 
@@ -198,7 +198,7 @@ describe("router (edge-based)", () => {
         makeStage("spec-review", "completed", { decision: "approved" }),
         makeStage("decompose", "pending"),
       ];
-      const skipped = await router.getSkippedStages(featurePipeline, stages, "company-1");
+      const skipped = await router.getSkippedStages(featurePipeline, stages);
       expect(skipped.map((s) => s.id)).not.toContain("decompose");
     });
 
@@ -208,13 +208,13 @@ describe("router (edge-based)", () => {
         makeStage("decompose", "completed"),
         makeStage("implement", "pending"),
       ];
-      const skipped = await router.getSkippedStages(featurePipeline, stages, "company-1");
+      const skipped = await router.getSkippedStages(featurePipeline, stages);
       expect(skipped.map((s) => s.id)).not.toContain("implement");
     });
 
     it("does not skip root stages", async () => {
       const stages = [makeStage("spec-review", "pending")];
-      const skipped = await router.getSkippedStages(featurePipeline, stages, "company-1");
+      const skipped = await router.getSkippedStages(featurePipeline, stages);
       expect(skipped).toHaveLength(0);
     });
   });
@@ -222,7 +222,7 @@ describe("router (edge-based)", () => {
   describe("evaluateFailure", () => {
     it("returns goto action when error edge exists", () => {
       const stageRow = makeStage("validate", "failed", { errors: ["test failed"] }, 0);
-      const result = router.evaluateFailure(featurePipeline, "validate", stageRow);
+      const result = router.evaluateFailure(featurePipeline, "validate");
       expect(result.action).toBe("goto");
       if (result.action === "goto") {
         expect(result.targetStageId).toBe("implement");
@@ -231,7 +231,7 @@ describe("router (edge-based)", () => {
 
     it("returns escalate when no error edges exist for the failed stage", () => {
       const stageRow = makeStage("spec-review", "failed", undefined, 0);
-      const result = router.evaluateFailure(featurePipeline, "spec-review", stageRow);
+      const result = router.evaluateFailure(featurePipeline, "spec-review");
       expect(result.action).toBe("escalate");
     });
   });

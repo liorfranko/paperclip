@@ -50,7 +50,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "pending"),
       makeStage("merge", "pending"),
     ];
-    const ready = await router.getReadyStages(fanOutPipeline, stages, "co-1");
+    const ready = await router.getReadyStages(fanOutPipeline, stages);
     const readyIds = ready.map((s) => s.id);
     expect(readyIds).toContain("backend");
     expect(readyIds).toContain("frontend");
@@ -65,7 +65,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "pending"),
       makeStage("merge", "pending"),
     ];
-    const skipped = await router.getSkippedStages(fanOutPipeline, stages, "co-1");
+    const skipped = await router.getSkippedStages(fanOutPipeline, stages);
     const skippedIds = skipped.map((s) => s.id);
     expect(skippedIds).toContain("frontend");
     expect(skippedIds).toContain("infra");
@@ -80,7 +80,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "skipped"),
       makeStage("merge", "pending"),
     ];
-    const ready = await router.getReadyStages(fanOutPipeline, stages, "co-1");
+    const ready = await router.getReadyStages(fanOutPipeline, stages);
     expect(ready.map((s) => s.id)).toContain("merge");
   });
 
@@ -92,7 +92,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "skipped"),
       makeStage("merge", "pending"),
     ];
-    const ready = await router.getReadyStages(fanOutPipeline, stages, "co-1");
+    const ready = await router.getReadyStages(fanOutPipeline, stages);
     expect(ready.map((s) => s.id)).not.toContain("merge");
   });
 
@@ -104,7 +104,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "pending"),
       makeStage("merge", "pending"),
     ];
-    const ready = await router.getReadyStages(fanOutPipeline, stages, "co-1");
+    const ready = await router.getReadyStages(fanOutPipeline, stages);
     const readyIds = ready.map((s) => s.id);
     expect(readyIds).toContain("backend");
     expect(readyIds).toContain("frontend");
@@ -119,7 +119,7 @@ describe("conditional fan-out (activationKey)", () => {
       makeStage("infra", "pending"),
       makeStage("merge", "pending"),
     ];
-    const skipped = await router.getSkippedStages(fanOutPipeline, stages, "co-1");
+    const skipped = await router.getSkippedStages(fanOutPipeline, stages);
     const skippedIds = skipped.map((s) => s.id);
     expect(skippedIds).toContain("backend");
     expect(skippedIds).toContain("frontend");

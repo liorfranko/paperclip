@@ -208,7 +208,6 @@ function PipelineEditorView({
       <div style={{ flex: 1, overflow: "hidden" }}>
         <PipelineCanvas
           pipeline={pipeline}
-          companyId={companyId}
           onSaved={onBack}
         />
       </div>
