@@ -117,28 +117,41 @@ describe("loop edges", () => {
   });
 
   describe("state machine loop edge counts", () => {
-    const mockDb = {
-      namespace: "test",
-      query: async () => [],
-      execute: async () => ({ rowCount: 1 }),
-    };
+    function createMockDb() {
+      const store = new Map<string, Record<string, number>>();
+      return {
+        namespace: "test",
+        query: async (_sql: string, params?: unknown[]) => {
+          const runId = params?.[0] as string;
+          return [{ loop_edge_counts: store.get(runId) ?? null }];
+        },
+        execute: async (_sql: string, params?: unknown[]) => {
+          if (typeof params?.[0] === "string" && (params[0] as string).startsWith("{")) {
+            const counts = JSON.parse(params[0] as string);
+            const runId = params[1] as string;
+            store.set(runId, counts);
+          }
+          return { rowCount: 1 };
+        },
+      };
+    }
 
-    it("tracks loop edge counts per run", () => {
-      const sm = new StateMachine(mockDb as any);
-      expect(sm.getLoopEdgeCounts("run-1")).toEqual({});
-      sm.incrementLoopEdgeCount("run-1", "e-loop");
-      expect(sm.getLoopEdgeCounts("run-1")).toEqual({ "e-loop": 1 });
-      sm.incrementLoopEdgeCount("run-1", "e-loop");
-      expect(sm.getLoopEdgeCounts("run-1")).toEqual({ "e-loop": 2 });
+    it("tracks loop edge counts per run", async () => {
+      const sm = new StateMachine(createMockDb() as any);
+      expect(await sm.getLoopEdgeCounts("run-1")).toEqual({});
+      await sm.incrementLoopEdgeCount("run-1", "e-loop");
+      expect(await sm.getLoopEdgeCounts("run-1")).toEqual({ "e-loop": 1 });
+      await sm.incrementLoopEdgeCount("run-1", "e-loop");
+      expect(await sm.getLoopEdgeCounts("run-1")).toEqual({ "e-loop": 2 });
     });
 
-    it("keeps counts isolated between runs", () => {
-      const sm = new StateMachine(mockDb as any);
-      sm.incrementLoopEdgeCount("run-a", "e1");
-      sm.incrementLoopEdgeCount("run-b", "e1");
-      sm.incrementLoopEdgeCount("run-b", "e1");
-      expect(sm.getLoopEdgeCounts("run-a")).toEqual({ "e1": 1 });
-      expect(sm.getLoopEdgeCounts("run-b")).toEqual({ "e1": 2 });
+    it("keeps counts isolated between runs", async () => {
+      const sm = new StateMachine(createMockDb() as any);
+      await sm.incrementLoopEdgeCount("run-a", "e1");
+      await sm.incrementLoopEdgeCount("run-b", "e1");
+      await sm.incrementLoopEdgeCount("run-b", "e1");
+      expect(await sm.getLoopEdgeCounts("run-a")).toEqual({ "e1": 1 });
+      expect(await sm.getLoopEdgeCounts("run-b")).toEqual({ "e1": 2 });
     });
   });
 });

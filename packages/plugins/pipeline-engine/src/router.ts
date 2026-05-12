@@ -76,12 +76,7 @@ export class Router {
         const sourceCompleted = sourceRow.status === "completed" || sourceRow.status === "skipped";
 
         if (!sourceCompleted) {
-          // Loop edges: source completed means the loop-back fires
-          if (edge.type === "loop") {
-            allSourcesResolved = false;
-          } else {
-            allSourcesResolved = false;
-          }
+          allSourcesResolved = false;
           continue;
         }
 

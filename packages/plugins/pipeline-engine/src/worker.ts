@@ -31,7 +31,13 @@ async function getPipelineRegistry(ctx: PluginContext): Promise<string[]> {
   const raw = await ctx.state.get(PIPELINE_REGISTRY_KEY);
   if (Array.isArray(raw)) return raw as string[];
   if (typeof raw === "string") {
-    try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; } catch {}
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      ctx.logger.warn("Pipeline registry state is not an array after parsing");
+    } catch (err) {
+      ctx.logger.error("Pipeline registry state is corrupted JSON", { error: String(err) });
+    }
   }
   return [];
 }
@@ -57,6 +63,8 @@ async function loadPipelines(ctx: PluginContext): Promise<PipelineDefinition[]> 
         } else {
           ctx.logger.warn("Invalid pipeline definition", { pipelineName, errors: validation.errors });
         }
+      } else {
+        ctx.logger.warn("Failed to parse pipeline JSON", { pipelineName });
       }
     }
   }
@@ -246,12 +254,15 @@ async function advancePipeline(
 
     try {
       const stageRows = await stateMachine.getRunStages(runId);
-      const loopEdgeCounts = stateMachine.getLoopEdgeCounts(runId);
+      const loopEdgeCounts = await stateMachine.getLoopEdgeCounts(runId);
 
       const skippedStages = await router.getSkippedStages(pipeline, stageRows, companyId, loopEdgeCounts);
       for (const stageDef of skippedStages) {
         const stageRow = stageRows.find((s) => s.stageId === stageDef.id);
-        if (!stageRow) continue;
+        if (!stageRow) {
+          ctx.logger.error("Skipped stage has no DB row", { runId, stageId: stageDef.id });
+          continue;
+        }
         await stateMachine.updateStageStatus(stageRow.id, "skipped");
         ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "skipped" });
       }
@@ -262,17 +273,17 @@ async function advancePipeline(
 
       const readyStages = await router.getReadyStages(pipeline, currentRows, companyId, loopEdgeCounts);
 
-      // Handle loop edges: if a stage became ready via a loop edge, reset the loop body
+      // Handle loop edges: if a stage became ready via a loop edge, reset the loop body + target
       for (const stageDef of readyStages) {
         const firingLoopEdges = router.getLoopEdgesForReadyStage(
           stageDef.id, pipeline, currentRows, loopEdgeCounts,
         );
         for (const loopEdge of firingLoopEdges) {
-          stateMachine.incrementLoopEdgeCount(runId, loopEdge.id);
+          await stateMachine.incrementLoopEdgeCount(runId, loopEdge.id);
           const loopBody = getLoopBodyStageIds(loopEdge.to, loopEdge.from, pipeline);
-          if (loopBody.length > 0) {
-            await stateMachine.resetLoopBodyStages(runId, loopBody);
-          }
+          // Include the loop target itself in the reset so it can be re-dispatched
+          const stagesToReset = [loopEdge.to, ...loopBody.filter((id) => id !== loopEdge.to)];
+          await stateMachine.resetLoopBodyStages(runId, stagesToReset);
         }
       }
       if (readyStages.length === 0) {
@@ -292,7 +303,10 @@ async function advancePipeline(
 
       for (const stageDef of readyStages) {
         const stageRow = currentRows.find((s) => s.stageId === stageDef.id);
-        if (!stageRow) continue;
+        if (!stageRow) {
+          ctx.logger.error("Ready stage has no DB row", { runId, stageId: stageDef.id });
+          continue;
+        }
 
         if (!router.requiresAgentDispatch(stageDef)) {
           ctx.logger.warn("Stage type not dispatchable", { stageId: stageDef.id, type: stageDef.type });
@@ -345,6 +359,8 @@ async function advancePipeline(
   }
 
   ctx.logger.error("Pipeline advancement hit iteration limit — possible infinite loop", { runId });
+  await stateMachine.updateRunStatus(runId, "failed");
+  ctx.streams.emit("run-progress", { runId, stageId: null, status: "failed" });
 }
 
 
@@ -396,7 +412,14 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
   }
 
   const stageDef = pipeline.stages.find((s) => s.id === stageRow.stageId);
-  if (!stageDef) return;
+  if (!stageDef) {
+    ctx.logger.error("Stage definition not found — possible schema drift", {
+      pipelineRunId: stageRow.pipelineRunId, stageId: stageRow.stageId,
+    });
+    await stateMachine.setStageError(stageRow.id, `Stage definition "${stageRow.stageId}" not found in pipeline`);
+    await stateMachine.updateStageStatus(stageRow.id, "failed");
+    return;
+  }
 
   const outputSchema = "output_schema" in stageDef ? stageDef.output_schema : undefined;
   if (outputSchema) {
@@ -641,7 +664,11 @@ const plugin = definePlugin({
             .filter((f) => f.endsWith(".json"))
             .map((f) => f.replace(/\.json$/, ""));
           if (schemas.length > 0) return { schemas };
-        } catch {}
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            ctx.logger.warn("Failed to read schemas directory", { dir, error: String(err) });
+          }
+        }
       }
       return { schemas: [] };
     });
@@ -662,7 +689,11 @@ const plugin = definePlugin({
             schemas[f.replace(/\.json$/, "")] = JSON.parse(content);
           }
           if (Object.keys(schemas).length > 0) return { schemas };
-        } catch {}
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            ctx.logger.warn("Failed to read schema contents", { dir, error: String(err) });
+          }
+        }
       }
       return { schemas: {} };
     });

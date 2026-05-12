@@ -18,7 +18,6 @@ export class StateMachine {
   }
 
   private activeLocks = new Set<string>();
-  private loopEdgeCounts = new Map<string, Record<string, number>>();
 
   async tryAdvisoryLock(runId: string): Promise<boolean> {
     if (this.activeLocks.has(runId)) return false;
@@ -30,14 +29,21 @@ export class StateMachine {
     this.activeLocks.delete(runId);
   }
 
-  getLoopEdgeCounts(runId: string): Record<string, number> {
-    return this.loopEdgeCounts.get(runId) ?? {};
+  async getLoopEdgeCounts(runId: string): Promise<Record<string, number>> {
+    const rows = await this.db.query<{ loop_edge_counts: Record<string, number> | null }>(
+      `SELECT loop_edge_counts FROM ${this.table("pipeline_runs")} WHERE id = $1`,
+      [runId],
+    );
+    return rows[0]?.loop_edge_counts ?? {};
   }
 
-  incrementLoopEdgeCount(runId: string, edgeId: string): number {
-    const counts = this.loopEdgeCounts.get(runId) ?? {};
+  async incrementLoopEdgeCount(runId: string, edgeId: string): Promise<number> {
+    const counts = await this.getLoopEdgeCounts(runId);
     counts[edgeId] = (counts[edgeId] ?? 0) + 1;
-    this.loopEdgeCounts.set(runId, counts);
+    await this.db.execute(
+      `UPDATE ${this.table("pipeline_runs")} SET loop_edge_counts = $1::jsonb WHERE id = $2`,
+      [JSON.stringify(counts), runId],
+    );
     return counts[edgeId];
   }
 
@@ -46,7 +52,7 @@ export class StateMachine {
     const placeholders = stageIds.map((_, i) => `$${i + 2}`).join(", ");
     await this.db.execute(
       `UPDATE ${this.table("pipeline_stages")} SET status = 'pending', output = NULL, error = NULL, started_at = NULL, completed_at = NULL
-       WHERE pipeline_run_id = $1 AND stage_id IN (${placeholders})`,
+       WHERE pipeline_run_id = $1 AND stage_id IN (${placeholders}) AND status != 'running'`,
       [pipelineRunId, ...stageIds],
     );
   }
