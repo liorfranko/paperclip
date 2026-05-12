@@ -320,7 +320,6 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
   }, [name, description, triggerLabel, stages, edgeDefs, positions, savePipeline, onSaved]);
 
   const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
-  const selectedEdge = edgeDefs.find((e) => e.id === selectedEdgeId) ?? null;
   const selectedRfEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
   return (

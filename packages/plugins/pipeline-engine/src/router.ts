@@ -1,5 +1,5 @@
 import { getActionById } from "./action-registry.js";
-import { getIncomingEdges, getErrorEdges, getRootStageIds, getLoopEdges } from "./edge-utils.js";
+import { getIncomingEdges, getErrorEdges, getRootStageIds } from "./edge-utils.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "./types.js";
 
 export class Router {
@@ -64,7 +64,6 @@ export class Router {
 
       let allSourcesResolved = true;
       let hasAnySatisfiedEdge = false;
-      let allUnconditionalSatisfied = true;
 
       for (const edge of incomingEdges) {
         const sourceRow = stageStatusMap.get(edge.from);
@@ -102,16 +101,11 @@ export class Router {
             hasAnySatisfiedEdge = true;
           }
         } else {
-          // Unconditional edge: must be satisfied for readiness
-          if (sourceCompleted) {
-            hasAnySatisfiedEdge = true;
-          } else {
-            allUnconditionalSatisfied = false;
-          }
+          hasAnySatisfiedEdge = true;
         }
       }
 
-      if (allSourcesResolved && allUnconditionalSatisfied && hasAnySatisfiedEdge) {
+      if (allSourcesResolved && hasAnySatisfiedEdge) {
         ready.push(stageDef);
       }
     }

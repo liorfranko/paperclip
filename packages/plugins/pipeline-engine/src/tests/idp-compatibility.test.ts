@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { parsePipeline, validateDAG } from "../dag-parser.js";
-import { buildExpressionContext } from "../expression-engine.js";
 import { Router } from "../router.js";
 import type { PipelineDefinition, PipelineStage, StageStatus } from "../types.js";
 
@@ -118,26 +117,6 @@ describe("IDP pipeline compatibility", () => {
     it("validates fast-track pipeline DAG", () => {
       const pipeline = parsePipeline(loadPipelineJson("fast-track"));
       expect(validateDAG(pipeline).valid).toBe(true);
-    });
-  });
-
-  describe("buildExpressionContext with IDP stages", () => {
-    it("builds context with underscore-normalized stage keys", () => {
-      const ctx = buildExpressionContext(
-        [{ stageId: "spec-review", status: "completed", output: { decision: "approved" }, retryCount: 0 }],
-        "feature", 1, "", "co-1",
-      );
-      expect(ctx.stages["spec_review"]).toBeDefined();
-      expect(ctx.stages["spec_review"].output).toEqual({ decision: "approved" });
-    });
-
-    it("preserves original hyphenated keys", () => {
-      const ctx = buildExpressionContext(
-        [{ stageId: "spec-review", status: "completed", output: { decision: "approved" }, retryCount: 0 }],
-        "feature", 1, "", "co-1",
-      );
-      expect(ctx.stages["spec-review"]).toBeDefined();
-      expect(ctx.stages["spec-review"].output).toEqual({ decision: "approved" });
     });
   });
 

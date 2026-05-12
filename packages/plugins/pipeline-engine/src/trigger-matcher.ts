@@ -17,12 +17,4 @@ export class TriggerMatcher {
     }
     return null;
   }
-
-  hasTriggerLabel(labelName: string): boolean {
-    return this.labelToPipeline.has(labelName);
-  }
-
-  get triggerLabels(): string[] {
-    return [...this.labelToPipeline.keys()];
-  }
 }

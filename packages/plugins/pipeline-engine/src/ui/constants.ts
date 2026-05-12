@@ -10,6 +10,7 @@ export const ACTION_KEYS = {
   SAVE_PIPELINE: "save-pipeline",
   DELETE_PIPELINE: "delete-pipeline",
   CANCEL_RUN: "cancel-run",
+  TRIGGER_RUN: "trigger-run",
 } as const;
 
 export const STREAM_CHANNELS = {

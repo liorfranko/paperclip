@@ -1,5 +1,5 @@
 import type { EdgeDefinition, PipelineDefinition, StageDefinition } from "./types.js";
-import { buildAdjacencyFromEdges, getForwardEdges, getLoopEdges } from "./edge-utils.js";
+import { buildAdjacencyFromEdges, getLoopEdges } from "./edge-utils.js";
 import { getActionById } from "./action-registry.js";
 
 export interface ValidationResult {
@@ -104,7 +104,7 @@ export function validateDAG(pipeline: PipelineDefinition): ValidationResult {
 
 
 function detectCycle(stages: StageDefinition[], edges: EdgeDefinition[]): string | null {
-  const adjacency = buildAdjacencyFromEdges(getForwardEdges(edges));
+  const adjacency = buildAdjacencyFromEdges(edges);
 
   const visited = new Set<string>();
   const inStack = new Set<string>();

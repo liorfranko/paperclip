@@ -132,8 +132,8 @@ export class StateMachine {
     return rows[0]?.retry_count ?? 0;
   }
 
-  async resetDownstreamStages(pipelineRunId: string, afterStageId: string, allStages: string[], adjacency: Map<string, string[]>): Promise<void> {
-    const downstream = this.getDownstreamStageIds(afterStageId, allStages, adjacency);
+  async resetDownstreamStages(pipelineRunId: string, afterStageId: string, adjacency: Map<string, string[]>): Promise<void> {
+    const downstream = this.getDownstreamStageIds(afterStageId, adjacency);
     if (downstream.length === 0) return;
 
     const placeholders = downstream.map((_, i) => `$${i + 2}`).join(", ");
@@ -144,7 +144,7 @@ export class StateMachine {
     );
   }
 
-  private getDownstreamStageIds(afterStageId: string, _allStageIds: string[], adjacency: Map<string, string[]>): string[] {
+  private getDownstreamStageIds(afterStageId: string, adjacency: Map<string, string[]>): string[] {
     const downstream = new Set<string>();
     const queue = [afterStageId];
     while (queue.length > 0) {
