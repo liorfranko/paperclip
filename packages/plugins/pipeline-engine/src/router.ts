@@ -1,6 +1,4 @@
-import { buildEdgeExpressionContext } from "./expression-engine.js";
-import { evaluateCondition } from "./expression-engine.js";
-import { getIncomingEdges, getOutgoingEdges, getErrorEdges, getRootStageIds } from "./edge-utils.js";
+import { getIncomingEdges, getErrorEdges, getRootStageIds, getLoopEdges } from "./edge-utils.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "./types.js";
 
 export class Router {
@@ -8,12 +6,14 @@ export class Router {
     pipeline: PipelineDefinition,
     stageRows: PipelineStage[],
     companyId: string,
+    loopEdgeCounts?: Record<string, number>,
   ): Promise<StageDefinition[]> {
     const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
     const ready: StageDefinition[] = [];
     const edges = pipeline.edges ?? [];
     const stageIds = pipeline.stages.map((s) => s.id);
     const rootIds = new Set(getRootStageIds(stageIds, edges));
+    const counts = loopEdgeCounts ?? {};
 
     for (const stageDef of pipeline.stages) {
       const row = stageStatusMap.get(stageDef.id);
@@ -22,18 +22,45 @@ export class Router {
       // Skip sub-pipeline stages (they need dynamic materialization)
       if (stageDef.type === "sub-pipeline") continue;
 
-      if (rootIds.has(stageDef.id)) {
-        // Root stages are ready immediately
+      const incomingEdges = getIncomingEdges(stageDef.id, edges);
+      const hasOnlyLoopIncoming = rootIds.has(stageDef.id) && incomingEdges.length > 0;
+
+      if (rootIds.has(stageDef.id) && incomingEdges.length === 0) {
         ready.push(stageDef);
         continue;
       }
 
-      const incomingEdges = getIncomingEdges(stageDef.id, edges);
+      if (hasOnlyLoopIncoming) {
+        // Stage is a DAG root but has incoming loop edges.
+        // Ready on initial pass (no loop source completed yet), or when a loop edge fires.
+        const anyLoopSourceCompleted = incomingEdges.some((e) => {
+          const src = stageStatusMap.get(e.from);
+          return src?.status === "completed";
+        });
+        if (!anyLoopSourceCompleted) {
+          // Initial pass — no loop source has completed yet
+          ready.push(stageDef);
+          continue;
+        }
+        // Check if any loop edge is satisfied (source completed, iterations remain)
+        const loopSatisfied = incomingEdges.some((e) => {
+          if (e.type !== "loop") return false;
+          const src = stageStatusMap.get(e.from);
+          if (src?.status !== "completed") return false;
+          const edgeCount = counts[e.id] ?? 0;
+          return edgeCount < (e.max_iterations ?? 0);
+        });
+        if (loopSatisfied) {
+          ready.push(stageDef);
+        }
+        continue;
+      }
+
       if (incomingEdges.length === 0) continue;
 
       // Determine fan_in strategy
-      const fanIn = "fan_in" in stageDef ? stageDef.fan_in : undefined;
-      const useFirstComplete = fanIn === "first_complete";
+      const fanInStrategy = stageDef.type === "fan_in" ? stageDef.fan_in_strategy : undefined;
+      const useFirstComplete = fanInStrategy === "first_complete";
 
       // Evaluate which source stages have completed and which edges are satisfied
       const satisfiedEdges: EdgeDefinition[] = [];
@@ -53,23 +80,26 @@ export class Router {
           continue;
         }
 
-        // Evaluate edge `when` condition if present
-        if (edge.when) {
-          const context = buildEdgeExpressionContext(
-            edge.from,
-            stageRows.map((s) => ({ stageId: s.stageId, status: s.status, output: s.output, retryCount: s.retryCount })),
-            pipeline.name,
-            1,
-            "",
-            companyId,
-          );
-          let conditionMet: boolean;
-          try {
-            conditionMet = await evaluateCondition(edge.when, context);
-          } catch {
-            conditionMet = false;
+        // Loop edge: check if iterations exhausted
+        if (edge.type === "loop") {
+          const edgeCount = counts[edge.id] ?? 0;
+          if (edgeCount >= (edge.max_iterations ?? 0)) {
+            // Loop exhausted — treat as unsatisfied, but source is resolved
+            continue;
           }
-          if (conditionMet) {
+        }
+
+        // activationKey-based routing: edge satisfied only if key is in source's tracks array
+        if (edge.activationKey) {
+          const sourceOutput = sourceRow.output as Record<string, unknown> | null;
+          const tracks = sourceOutput?.tracks;
+          if (Array.isArray(tracks) && tracks.includes(edge.activationKey)) {
+            satisfiedEdges.push(edge);
+          }
+        } else if (edge.sourceHandle) {
+          // sourceHandle-based routing: edge satisfied only if source decision matches
+          const sourceOutput = sourceRow.output as Record<string, unknown> | null;
+          if (sourceOutput?.decision === edge.sourceHandle) {
             satisfiedEdges.push(edge);
           }
         } else {
@@ -94,16 +124,38 @@ export class Router {
     return ready;
   }
 
+  getLoopEdgesForReadyStage(
+    stageId: string,
+    pipeline: PipelineDefinition,
+    stageRows: PipelineStage[],
+    loopEdgeCounts?: Record<string, number>,
+  ): EdgeDefinition[] {
+    const edges = pipeline.edges ?? [];
+    const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
+    const counts = loopEdgeCounts ?? {};
+    const incomingLoopEdges = edges.filter(
+      (e) => e.to === stageId && e.type === "loop",
+    );
+    return incomingLoopEdges.filter((edge) => {
+      const sourceRow = stageStatusMap.get(edge.from);
+      if (!sourceRow || sourceRow.status !== "completed") return false;
+      const edgeCount = counts[edge.id] ?? 0;
+      return edgeCount < (edge.max_iterations ?? 0);
+    });
+  }
+
   async getSkippedStages(
     pipeline: PipelineDefinition,
     stageRows: PipelineStage[],
     companyId: string,
+    loopEdgeCounts?: Record<string, number>,
   ): Promise<StageDefinition[]> {
     const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
     const skipped: StageDefinition[] = [];
     const edges = pipeline.edges ?? [];
     const stageIds = pipeline.stages.map((s) => s.id);
     const rootIds = new Set(getRootStageIds(stageIds, edges));
+    const counts = loopEdgeCounts ?? {};
 
     for (const stageDef of pipeline.stages) {
       const row = stageStatusMap.get(stageDef.id);
@@ -120,43 +172,45 @@ export class Router {
       });
       if (!allSourcesResolved) continue;
 
-      // Evaluate conditional edges
-      let hasUnsatisfiedConditional = false;
-      let hasUnconditionalWithCompletedSource = false;
+      // Check if any edge is satisfied
+      let anySatisfied = false;
 
       for (const edge of incomingEdges) {
         const sourceRow = stageStatusMap.get(edge.from);
         const sourceCompleted = sourceRow?.status === "completed";
 
-        if (!edge.when) {
-          if (sourceCompleted) {
-            hasUnconditionalWithCompletedSource = true;
+        if (!sourceCompleted) continue;
+
+        // Loop edge: check iterations
+        if (edge.type === "loop") {
+          const edgeCount = counts[edge.id] ?? 0;
+          if (edgeCount >= (edge.max_iterations ?? 0)) {
+            continue;
+          }
+        }
+
+        if (edge.activationKey) {
+          const sourceOutput = sourceRow.output as Record<string, unknown> | null;
+          const tracks = sourceOutput?.tracks;
+          if (Array.isArray(tracks) && tracks.includes(edge.activationKey)) {
+            anySatisfied = true;
+            break;
+          }
+        } else if (edge.sourceHandle) {
+          const sourceOutput = sourceRow.output as Record<string, unknown> | null;
+          if (sourceOutput?.decision === edge.sourceHandle) {
+            anySatisfied = true;
+            break;
           }
         } else {
-          if (sourceCompleted) {
-            const context = buildEdgeExpressionContext(
-              edge.from,
-              stageRows.map((s) => ({ stageId: s.stageId, status: s.status, output: s.output, retryCount: s.retryCount })),
-              pipeline.name,
-              1,
-              "",
-              companyId,
-            );
-            let conditionMet: boolean;
-            try {
-              conditionMet = await evaluateCondition(edge.when, context);
-            } catch {
-              conditionMet = false;
-            }
-            if (!conditionMet) {
-              hasUnsatisfiedConditional = true;
-            }
-          }
+          // Unconditional edge from completed source — satisfied
+          anySatisfied = true;
+          break;
         }
       }
 
-      // Skip if all conditional edges from completed sources evaluated false, and no unconditional completed source
-      if (hasUnsatisfiedConditional && !hasUnconditionalWithCompletedSource) {
+      // Skip if all sources resolved but no edge is satisfied
+      if (!anySatisfied) {
         skipped.push(stageDef);
       }
     }
@@ -177,30 +231,15 @@ export class Router {
       return { action: "escalate" };
     }
 
-    // Find first error edge that targets a stage with retry config
-    for (const errorEdge of errorEdgesFromFailed) {
-      const targetStageDef = pipeline.stages.find((s) => s.id === errorEdge.to);
-      if (!targetStageDef) continue;
-
-      const retry = targetStageDef.retry;
-      if (!retry) continue;
-
-      const retryRow = targetStageRow ?? stageRow;
-      if (retryRow.retryCount >= retry.max_retries) {
-        return { action: "escalate" };
-      }
-
-      return {
-        action: "goto",
-        targetStageId: errorEdge.to,
-        body: retry.body,
-      };
-    }
-
-    return { action: "escalate" };
+    // Use first error edge as the goto target
+    const errorEdge = errorEdgesFromFailed[0];
+    return {
+      action: "goto",
+      targetStageId: errorEdge.to,
+    };
   }
 
   requiresAgentDispatch(stageDef: StageDefinition): boolean {
-    return stageDef.type === "worker" || stageDef.type === "classifier" || stageDef.type === "parallel_fan_out";
+    return stageDef.type === "stage" || stageDef.type === "fan_out";
   }
 }

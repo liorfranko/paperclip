@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,8 +10,8 @@ import {
 } from "@paperclipai/plugin-sdk";
 import { parsePipeline, validateDAG } from "./dag-parser.js";
 import { Dispatcher } from "./dispatcher.js";
-import { buildExpressionContext, evaluateCondition } from "./expression-engine.js";
-import { buildAdjacencyFromEdges } from "./edge-utils.js";
+import { buildExpressionContext } from "./expression-engine.js";
+import { buildAdjacencyFromEdges, getForwardEdges } from "./edge-utils.js";
 import { extractOutput, loadSchema, validateOutput } from "./output-parser.js";
 import { Router } from "./router.js";
 import { StateMachine } from "./state-machine.js";
@@ -31,7 +31,13 @@ async function getPipelineRegistry(ctx: PluginContext): Promise<string[]> {
   const raw = await ctx.state.get(PIPELINE_REGISTRY_KEY);
   if (Array.isArray(raw)) return raw as string[];
   if (typeof raw === "string") {
-    try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; } catch {}
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      ctx.logger.warn("Pipeline registry state is not an array after parsing");
+    } catch (err) {
+      ctx.logger.error("Pipeline registry state is corrupted JSON", { error: String(err) });
+    }
   }
   return [];
 }
@@ -57,6 +63,8 @@ async function loadPipelines(ctx: PluginContext): Promise<PipelineDefinition[]> 
         } else {
           ctx.logger.warn("Invalid pipeline definition", { pipelineName, errors: validation.errors });
         }
+      } else {
+        ctx.logger.warn("Failed to parse pipeline JSON", { pipelineName });
       }
     }
   }
@@ -161,6 +169,71 @@ async function materializePipeline(
   await advancePipeline(ctx, runId, pipeline, companyId);
 }
 
+function getLoopBodyStageIds(
+  loopTargetId: string,
+  loopSourceId: string,
+  pipeline: PipelineDefinition,
+): string[] {
+  const forwardEdges = getForwardEdges(pipeline.edges ?? []);
+  const adjacency = new Map<string, string[]>();
+  for (const edge of forwardEdges) {
+    const existing = adjacency.get(edge.from) ?? [];
+    existing.push(edge.to);
+    adjacency.set(edge.from, existing);
+  }
+
+  // BFS from loopTarget to loopSource (exclusive of loopTarget itself)
+  const body = new Set<string>();
+  const queue = adjacency.get(loopTargetId) ?? [];
+  const visited = new Set<string>();
+
+  for (const next of queue) {
+    if (!visited.has(next)) {
+      visited.add(next);
+      body.add(next);
+    }
+  }
+
+  let idx = 0;
+  const bfsQueue = [...body];
+  while (idx < bfsQueue.length) {
+    const current = bfsQueue[idx++];
+    if (current === loopSourceId) continue;
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        body.add(neighbor);
+        bfsQueue.push(neighbor);
+      }
+    }
+  }
+
+  // Only include stages between target and source (on a path to source)
+  // Filter: only keep stages that can reach loopSourceId
+  const result: string[] = [];
+  for (const stageId of body) {
+    if (stageId === loopSourceId || canReach(stageId, loopSourceId, adjacency)) {
+      result.push(stageId);
+    }
+  }
+  return result;
+}
+
+function canReach(from: string, to: string, adjacency: Map<string, string[]>): boolean {
+  const visited = new Set<string>();
+  const queue = [from];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === to) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const neighbor of adjacency.get(current) ?? []) {
+      queue.push(neighbor);
+    }
+  }
+  return false;
+}
+
 async function advancePipeline(
   ctx: PluginContext,
   runId: string,
@@ -181,11 +254,15 @@ async function advancePipeline(
 
     try {
       const stageRows = await stateMachine.getRunStages(runId);
+      const loopEdgeCounts = await stateMachine.getLoopEdgeCounts(runId);
 
-      const skippedStages = await router.getSkippedStages(pipeline, stageRows, companyId);
+      const skippedStages = await router.getSkippedStages(pipeline, stageRows, companyId, loopEdgeCounts);
       for (const stageDef of skippedStages) {
         const stageRow = stageRows.find((s) => s.stageId === stageDef.id);
-        if (!stageRow) continue;
+        if (!stageRow) {
+          ctx.logger.error("Skipped stage has no DB row", { runId, stageId: stageDef.id });
+          continue;
+        }
         await stateMachine.updateStageStatus(stageRow.id, "skipped");
         ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "skipped" });
       }
@@ -194,7 +271,21 @@ async function advancePipeline(
         ? await stateMachine.getRunStages(runId)
         : stageRows;
 
-      const readyStages = await router.getReadyStages(pipeline, currentRows, companyId);
+      const readyStages = await router.getReadyStages(pipeline, currentRows, companyId, loopEdgeCounts);
+
+      // Handle loop edges: if a stage became ready via a loop edge, reset the loop body + target
+      for (const stageDef of readyStages) {
+        const firingLoopEdges = router.getLoopEdgesForReadyStage(
+          stageDef.id, pipeline, currentRows, loopEdgeCounts,
+        );
+        for (const loopEdge of firingLoopEdges) {
+          await stateMachine.incrementLoopEdgeCount(runId, loopEdge.id);
+          const loopBody = getLoopBodyStageIds(loopEdge.to, loopEdge.from, pipeline);
+          // Include the loop target itself in the reset so it can be re-dispatched
+          const stagesToReset = [loopEdge.to, ...loopBody.filter((id) => id !== loopEdge.to)];
+          await stateMachine.resetLoopBodyStages(runId, stagesToReset);
+        }
+      }
       if (readyStages.length === 0) {
         const allDone = currentRows.every((s) => s.status === "completed" || s.status === "skipped");
         const anyFailed = currentRows.some((s) => s.status === "failed");
@@ -210,15 +301,10 @@ async function advancePipeline(
         return;
       }
 
-      let advancedGate = false;
-
       for (const stageDef of readyStages) {
         const stageRow = currentRows.find((s) => s.stageId === stageDef.id);
-        if (!stageRow) continue;
-
-        if (stageDef.type === "gate") {
-          await handleGateStage(ctx, runId, pipeline, stageDef, stageRow, companyId);
-          advancedGate = true;
+        if (!stageRow) {
+          ctx.logger.error("Ready stage has no DB row", { runId, stageId: stageDef.id });
           continue;
         }
 
@@ -266,63 +352,17 @@ async function advancePipeline(
         }
       }
 
-      if (!advancedGate) return;
+      return;
     } finally {
       await stateMachine.releaseAdvisoryLock(runId);
     }
   }
 
   ctx.logger.error("Pipeline advancement hit iteration limit — possible infinite loop", { runId });
+  await stateMachine.updateRunStatus(runId, "failed");
+  ctx.streams.emit("run-progress", { runId, stageId: null, status: "failed" });
 }
 
-async function handleGateStage(
-  ctx: PluginContext,
-  runId: string,
-  pipeline: PipelineDefinition,
-  stageDef: StageDefinition,
-  stageRow: { id: string },
-  companyId: string,
-): Promise<void> {
-  const stageRows = await stateMachine.getRunStages(runId);
-
-  const context = buildExpressionContext(
-    stageRows.map((s) => ({ stageId: s.stageId, status: s.status, output: s.output, retryCount: s.retryCount })),
-    pipeline.name,
-    1,
-    "",
-    companyId,
-  );
-
-  // Gate condition: evaluate the outgoing edge conditions
-  // (Gates pass if any outgoing edge condition is truthy or no condition exists)
-  const outgoingEdges = (pipeline.edges ?? []).filter((e) => e.from === stageDef.id && e.type !== "error");
-  let conditionMet = outgoingEdges.length === 0; // no edges = pass-through
-
-  for (const edge of outgoingEdges) {
-    if (!edge.when) {
-      conditionMet = true;
-      break;
-    }
-    try {
-      const result = await evaluateCondition(edge.when, context);
-      if (result) {
-        conditionMet = true;
-        break;
-      }
-    } catch (err) {
-      ctx.logger.error("Gate edge condition evaluation failed", { stageId: stageDef.id, edgeId: edge.id, error: String(err) });
-    }
-  }
-
-  if (conditionMet) {
-    await stateMachine.updateStageStatus(stageRow.id, "completed");
-    ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
-  } else {
-    await stateMachine.updateStageStatus(stageRow.id, "failed");
-    ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "failed" });
-    await handleStageFailure(ctx, runId, pipeline, stageDef, stageRow.id, companyId);
-  }
-}
 
 async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promise<void> {
   const issueId = event.entityId;
@@ -372,7 +412,14 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
   }
 
   const stageDef = pipeline.stages.find((s) => s.id === stageRow.stageId);
-  if (!stageDef) return;
+  if (!stageDef) {
+    ctx.logger.error("Stage definition not found — possible schema drift", {
+      pipelineRunId: stageRow.pipelineRunId, stageId: stageRow.stageId,
+    });
+    await stateMachine.setStageError(stageRow.id, `Stage definition "${stageRow.stageId}" not found in pipeline`);
+    await stateMachine.updateStageStatus(stageRow.id, "failed");
+    return;
+  }
 
   const outputSchema = "output_schema" in stageDef ? stageDef.output_schema : undefined;
   if (outputSchema) {
@@ -617,9 +664,38 @@ const plugin = definePlugin({
             .filter((f) => f.endsWith(".json"))
             .map((f) => f.replace(/\.json$/, ""));
           if (schemas.length > 0) return { schemas };
-        } catch {}
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            ctx.logger.warn("Failed to read schemas directory", { dir, error: String(err) });
+          }
+        }
       }
       return { schemas: [] };
+    });
+
+    ctx.data.register("list-schema-contents", async () => {
+      const candidates = [
+        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
+        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
+        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
+      ];
+      for (const dir of candidates) {
+        try {
+          const files = readdirSync(dir);
+          const schemas: Record<string, unknown> = {};
+          for (const f of files) {
+            if (!f.endsWith(".json")) continue;
+            const content = readFileSync(resolve(dir, f), "utf-8");
+            schemas[f.replace(/\.json$/, "")] = JSON.parse(content);
+          }
+          if (Object.keys(schemas).length > 0) return { schemas };
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            ctx.logger.warn("Failed to read schema contents", { dir, error: String(err) });
+          }
+        }
+      }
+      return { schemas: {} };
     });
 
     // Action handlers for UI

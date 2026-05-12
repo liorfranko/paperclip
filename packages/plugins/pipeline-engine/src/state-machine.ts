@@ -29,6 +29,34 @@ export class StateMachine {
     this.activeLocks.delete(runId);
   }
 
+  async getLoopEdgeCounts(runId: string): Promise<Record<string, number>> {
+    const rows = await this.db.query<{ loop_edge_counts: Record<string, number> | null }>(
+      `SELECT loop_edge_counts FROM ${this.table("pipeline_runs")} WHERE id = $1`,
+      [runId],
+    );
+    return rows[0]?.loop_edge_counts ?? {};
+  }
+
+  async incrementLoopEdgeCount(runId: string, edgeId: string): Promise<number> {
+    const counts = await this.getLoopEdgeCounts(runId);
+    counts[edgeId] = (counts[edgeId] ?? 0) + 1;
+    await this.db.execute(
+      `UPDATE ${this.table("pipeline_runs")} SET loop_edge_counts = $1::jsonb WHERE id = $2`,
+      [JSON.stringify(counts), runId],
+    );
+    return counts[edgeId];
+  }
+
+  async resetLoopBodyStages(pipelineRunId: string, stageIds: string[]): Promise<void> {
+    if (stageIds.length === 0) return;
+    const placeholders = stageIds.map((_, i) => `$${i + 2}`).join(", ");
+    await this.db.execute(
+      `UPDATE ${this.table("pipeline_stages")} SET status = 'pending', output = NULL, error = NULL, started_at = NULL, completed_at = NULL
+       WHERE pipeline_run_id = $1 AND stage_id IN (${placeholders}) AND status != 'running'`,
+      [pipelineRunId, ...stageIds],
+    );
+  }
+
   async claimStageForDispatch(stageRowId: string): Promise<boolean> {
     const result = await this.db.execute(
       `UPDATE ${this.table("pipeline_stages")} SET status = 'running', started_at = NOW()
