@@ -1,43 +1,5 @@
 import type { StageType } from "../../types.js";
-
-interface StageTypeCard {
-  type: StageType;
-  label: string;
-  description: string;
-  color: string;
-  badge: string;
-}
-
-const STAGE_TYPES: StageTypeCard[] = [
-  {
-    type: "stage",
-    label: "Stage",
-    description: "Agent performs work and routes by decision",
-    color: "#3b82f6",
-    badge: "STG",
-  },
-  {
-    type: "fan_out",
-    label: "Fan Out",
-    description: "Distribute work across multiple parallel agents",
-    color: "#06b6d4",
-    badge: "FAN",
-  },
-  {
-    type: "fan_in",
-    label: "Fan In",
-    description: "Wait for parallel branches to complete",
-    color: "#8b5cf6",
-    badge: "FIN",
-  },
-  {
-    type: "sub-pipeline",
-    label: "Sub-Pipeline",
-    description: "Invoke a nested pipeline definition",
-    color: "#22c55e",
-    badge: "SUB",
-  },
-];
+import { STAGE_TYPES } from "../stage-type-meta.js";
 
 export function StagePalette() {
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, type: StageType) => {

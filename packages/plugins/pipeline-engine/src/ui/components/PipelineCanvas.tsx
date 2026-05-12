@@ -17,27 +17,11 @@ import { StageNode, type StageNodeData } from "./StageNode.js";
 import { StageInspector } from "./StageInspector.js";
 import { computeAutoLayout } from "../hooks/useAutoLayout.js";
 import { ACTION_KEYS } from "../constants.js";
+import { edgeStyleForType } from "../edge-styles.js";
 import { validatePipeline, ValidationErrorsPanel, type ValidationError } from "./ValidationErrors.js";
 import type { PipelineDefinition, StageDefinition, StageType, EdgeDefinition } from "../../types.js";
 
 const NODE_TYPES = { stage: StageNode };
-
-function buildEdges(pipeline: PipelineDefinition): Edge[] {
-  return (pipeline.edges ?? []).map((e) => ({
-    id: e.id,
-    source: e.from,
-    target: e.to,
-    sourceHandle: e.sourceHandle ?? null,
-    label: e.sourceHandle ?? e.label,
-    data: { type: e.type, sourceHandle: e.sourceHandle, activationKey: e.activationKey, max_iterations: e.max_iterations },
-    style: {
-      stroke: e.type === "error" ? "#ef4444" : e.type === "loop" ? "#f59e0b" : "#4b5563",
-      strokeWidth: 2,
-      ...(e.type === "loop" ? { strokeDasharray: "5 3" } : {}),
-    },
-    animated: false,
-  }));
-}
 
 function stageDefaults(type: StageType, id: string): StageDefinition {
   switch (type) {
@@ -56,11 +40,10 @@ let nodeSeq = 1;
 
 export interface PipelineCanvasProps {
   pipeline: PipelineDefinition;
-  companyId: string | null;
   onSaved?: () => void;
 }
 
-export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasProps) {
+export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = xyflowStyles;
@@ -99,7 +82,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
       id: stage.id,
       type: "stage" as const,
       position: positions[stage.id] ?? { x: 0, y: 0 },
-      data: { stage, selected: stage.id === selectedStageId, onSelect: handleNodeSelect } as unknown as StageNodeData,
+      data: { stage, onSelect: handleNodeSelect } as unknown as StageNodeData,
     })),
     [stages, positions, selectedStageId, handleNodeSelect],
   );
@@ -112,11 +95,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
       sourceHandle: e.sourceHandle ?? null,
       label: e.sourceHandle ?? e.label,
       data: { type: e.type, sourceHandle: e.sourceHandle, activationKey: e.activationKey, max_iterations: e.max_iterations },
-      style: {
-        stroke: e.type === "error" ? "#ef4444" : e.type === "loop" ? "#f59e0b" : "#4b5563",
-        strokeWidth: 2,
-        ...(e.type === "loop" ? { strokeDasharray: "5 3" } : {}),
-      },
+      style: edgeStyleForType(e.type),
       selected: e.id === selectedEdgeId,
     })),
     [edgeDefs, selectedEdgeId],
@@ -159,7 +138,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
           {
             ...connection,
             id: newEdge.id,
-            style: { stroke: "#4b5563", strokeWidth: 2 },
+            style: edgeStyleForType("default"),
           },
           eds,
         ),
@@ -167,11 +146,6 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
     },
     [setEdges],
   );
-
-  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    setSelectedStageId(node.id);
-    setSelectedEdgeId(null);
-  }, []);
 
   const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[]; edges: Edge[] }) => {
     if (selectedNodes.length === 1) {
@@ -296,7 +270,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
                 ...(changes.label !== undefined ? { label: changes.label } : {}),
                 ...(changes.sourceHandle !== undefined ? { sourceHandle: changes.sourceHandle, label: changes.sourceHandle } : {}),
                 ...(changes.type !== undefined
-                  ? { style: { stroke: changes.type === "error" ? "#ef4444" : changes.type === "loop" ? "#f59e0b" : "#4b5563", strokeWidth: 2, ...(changes.type === "loop" ? { strokeDasharray: "5 3" } : {}) } }
+                  ? { style: edgeStyleForType(changes.type) }
                   : {}),
                 data: { ...(e.data ?? {}), ...changes },
               }
@@ -431,7 +405,6 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={handleConnect}
-            onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             onPaneClick={handlePaneClick}
             onNodeDragStop={handleNodeDragStop}
@@ -452,8 +425,6 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
         <StageInspector
           selectedStage={selectedStage}
           selectedEdge={selectedRfEdge}
-          stageIds={stages.map((s) => s.id)}
-          edges={edgeDefs}
           currentPipelineName={name}
           onStageChange={handleStageChange}
           onStageDelete={handleStageDelete}

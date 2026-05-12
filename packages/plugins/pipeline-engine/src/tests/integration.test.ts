@@ -51,7 +51,7 @@ describe("integration: end-to-end pipeline flow", () => {
     ];
 
     // Root stage (spec-review) is ready immediately
-    const ready = await router.getReadyStages(pipeline, initialStages, "company-1");
+    const ready = await router.getReadyStages(pipeline, initialStages);
     expect(ready).toHaveLength(1);
     expect(ready[0].id).toBe("spec-review");
 
@@ -82,7 +82,7 @@ describe("integration: end-to-end pipeline flow", () => {
       { ...initialStages[1] },
       { ...initialStages[2] },
     ];
-    const nextReady = await router.getReadyStages(pipeline, afterSpecReview, "company-1");
+    const nextReady = await router.getReadyStages(pipeline, afterSpecReview);
     expect(nextReady).toHaveLength(1);
     expect(nextReady[0].id).toBe("implement");
 
@@ -92,19 +92,19 @@ describe("integration: end-to-end pipeline flow", () => {
       { ...initialStages[1] },
       { ...initialStages[2] },
     ];
-    const skipped = await router.getSkippedStages(pipeline, afterRejected, "company-1");
+    const skipped = await router.getSkippedStages(pipeline, afterRejected);
     expect(skipped.map((s) => s.id)).toContain("implement");
 
     // Failure routing via error edges — goto when error edge exists
     const failedValidateStage: PipelineStage = { ...initialStages[2], status: "failed", output: { errors: ["test_a failed"] }, retryCount: 0 };
-    const failureAction = router.evaluateFailure(pipeline, "validate", failedValidateStage);
+    const failureAction = router.evaluateFailure(pipeline, "validate");
     expect(failureAction.action).toBe("goto");
     if (failureAction.action === "goto") {
       expect(failureAction.targetStageId).toBe("implement");
     }
 
     // Escalate when no error edge exists
-    const specFailure = router.evaluateFailure(pipeline, "spec-review", failedValidateStage);
+    const specFailure = router.evaluateFailure(pipeline, "spec-review");
     expect(specFailure.action).toBe("escalate");
   });
 
@@ -117,7 +117,7 @@ describe("integration: end-to-end pipeline flow", () => {
       { id: "r2", pipelineRunId: "run-2", stageId: "implement", subIssueId: null, status: "pending", retryCount: 0, output: null, error: null, startedAt: null, completedAt: null },
       { id: "r3", pipelineRunId: "run-2", stageId: "validate", subIssueId: null, status: "pending", retryCount: 0, output: null, error: null, startedAt: null, completedAt: null },
     ];
-    const readyApproved = await router.getReadyStages(pipeline, stagesApproved, "co-1");
+    const readyApproved = await router.getReadyStages(pipeline, stagesApproved);
     expect(readyApproved.map((s) => s.id)).toContain("implement");
 
     const stagesRejected: PipelineStage[] = [
@@ -125,10 +125,10 @@ describe("integration: end-to-end pipeline flow", () => {
       { ...stagesApproved[1] },
       { ...stagesApproved[2] },
     ];
-    const readyRejected = await router.getReadyStages(pipeline, stagesRejected, "co-1");
+    const readyRejected = await router.getReadyStages(pipeline, stagesRejected);
     expect(readyRejected.map((s) => s.id)).not.toContain("implement");
 
-    const skipped = await router.getSkippedStages(pipeline, stagesRejected, "co-1");
+    const skipped = await router.getSkippedStages(pipeline, stagesRejected);
     expect(skipped.map((s) => s.id)).toContain("implement");
   });
 });

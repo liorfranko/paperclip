@@ -1,12 +1,6 @@
 import Handlebars from "handlebars";
 
-const missingVars: string[] = [];
-
-Handlebars.registerHelper("helperMissing", function (this: unknown, ...args: unknown[]) {
-  const options = args[args.length - 1] as { name?: string };
-  if (options?.name) {
-    missingVars.push(options.name);
-  }
+Handlebars.registerHelper("helperMissing", function () {
   return "";
 });
 
@@ -29,13 +23,7 @@ function serializeValues(value: unknown): unknown {
 }
 
 export function renderTemplate(template: string, context: Record<string, unknown>): string {
-  missingVars.length = 0;
   const serialized = serializeValues(context) as Record<string, unknown>;
   const compiled = Handlebars.compile(template, { noEscape: true });
-  const result = compiled(serialized);
-  return result;
-}
-
-export function getLastMissingVars(): string[] {
-  return [...missingVars];
+  return compiled(serialized);
 }

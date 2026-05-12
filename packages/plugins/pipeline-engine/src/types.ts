@@ -83,15 +83,6 @@ export interface PipelineStage {
   completedAt: Date | null;
 }
 
-export interface SubPipelineRun {
-  id: string;
-  parentPipelineRunId: string;
-  parentStageId: string;
-  childPipelineRunId: string;
-  taskIndex: number;
-  orderingPosition: number;
-}
-
 export interface RoleMapping {
   [role: string]: string;
 }
@@ -101,17 +92,10 @@ export interface PipelineEngineConfig {
   trigger_labels: Record<string, string>;
 }
 
-export interface StageOutput {
-  status?: string;
-  decision?: string;
-  [key: string]: unknown;
-}
-
 export interface ExpressionContext {
-  stages: Record<string, { output: StageOutput | StageOutput[] | null; status: StageStatus; retry_count: number }>;
+  stages: Record<string, { output: Record<string, unknown> | null; status: StageStatus; retry_count: number }>;
   pipeline: { name: string; version: number; parent_issue_id: string };
   env: { company_id: string };
-  output?: StageOutput | StageOutput[] | null;
 }
 
 export interface DispatchRequest {

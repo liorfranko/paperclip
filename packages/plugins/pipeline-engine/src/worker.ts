@@ -11,8 +11,7 @@ import {
 import { getActionById } from "./action-registry.js";
 import { parsePipeline, validateDAG } from "./dag-parser.js";
 import { Dispatcher } from "./dispatcher.js";
-import { buildExpressionContext } from "./expression-engine.js";
-import { buildAdjacencyFromEdges, getForwardEdges } from "./edge-utils.js";
+import { buildAdjacencyFromEdges } from "./edge-utils.js";
 import { extractOutput, validateOutput } from "./output-parser.js";
 import { Router } from "./router.js";
 import { StateMachine } from "./state-machine.js";
@@ -221,13 +220,7 @@ function getLoopBodyStageIds(
   loopSourceId: string,
   pipeline: PipelineDefinition,
 ): string[] {
-  const forwardEdges = getForwardEdges(pipeline.edges ?? []);
-  const adjacency = new Map<string, string[]>();
-  for (const edge of forwardEdges) {
-    const existing = adjacency.get(edge.from) ?? [];
-    existing.push(edge.to);
-    adjacency.set(edge.from, existing);
-  }
+  const adjacency = buildAdjacencyFromEdges(pipeline.edges ?? []);
 
   // BFS from loopTarget to loopSource (exclusive of loopTarget itself)
   const body = new Set<string>();
@@ -303,7 +296,7 @@ async function advancePipeline(
       const stageRows = await stateMachine.getRunStages(runId);
       const loopEdgeCounts = await stateMachine.getLoopEdgeCounts(runId);
 
-      const skippedStages = await router.getSkippedStages(pipeline, stageRows, companyId, loopEdgeCounts);
+      const skippedStages = await router.getSkippedStages(pipeline, stageRows, loopEdgeCounts);
       for (const stageDef of skippedStages) {
         const stageRow = stageRows.find((s) => s.stageId === stageDef.id);
         if (!stageRow) {
@@ -317,7 +310,7 @@ async function advancePipeline(
       // Evaluate loop overflow for completed stages with loop edges
       for (const stageRow of stageRows) {
         if (stageRow.status !== "completed") continue;
-        const overflowAction = router.evaluateLoopOverflow(pipeline, stageRow.stageId, stageRow, loopEdgeCounts);
+        const overflowAction = router.evaluateLoopOverflow(pipeline, stageRow.stageId, loopEdgeCounts);
         if (!overflowAction) continue;
 
         if (overflowAction.action === "escalate") {
@@ -327,22 +320,13 @@ async function advancePipeline(
           return;
         }
 
-        if (overflowAction.action === "goto" && overflowAction.targetStageId) {
-          const targetRow = stageRows.find((s) => s.stageId === overflowAction.targetStageId);
-          if (targetRow && targetRow.status === "pending") {
-            ctx.logger.info("Loop overflow — routing to error target", {
-              runId, stageId: stageRow.stageId, targetStageId: overflowAction.targetStageId,
-            });
-            await stateMachine.updateStageStatus(targetRow.id, "pending");
-          }
-        }
       }
 
       const currentRows = skippedStages.length > 0
         ? await stateMachine.getRunStages(runId)
         : stageRows;
 
-      const readyStages = await router.getReadyStages(pipeline, currentRows, companyId, loopEdgeCounts);
+      const readyStages = await router.getReadyStages(pipeline, currentRows, loopEdgeCounts);
 
       // Handle loop edges: if a stage became ready via a loop edge, reset the loop body + target
       for (const stageDef of readyStages) {
@@ -595,7 +579,7 @@ async function handleStageFailure(
     ? stageRows.find((s) => s.stageId === targetStageId)
     : undefined;
 
-  const failureAction = router.evaluateFailure(pipeline, stageDef.id, stageRow, targetRow ?? undefined);
+  const failureAction = router.evaluateFailure(pipeline, stageDef.id);
 
   if (failureAction.action === "escalate") {
     await stateMachine.updateRunStatus(runId, "escalated");

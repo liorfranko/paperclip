@@ -156,7 +156,7 @@ describe("IDP pipeline compatibility", () => {
         return makeStage(s.id, "completed", {});
       });
 
-      const ready = await router.getReadyStages(pipeline, stages, "co-1");
+      const ready = await router.getReadyStages(pipeline, stages);
       expect(ready.map((s) => s.id)).toContain("review");
     });
   });
@@ -171,7 +171,7 @@ describe("IDP pipeline compatibility", () => {
         makeStage("decompose", "running"),
         makeStage("write-tests", "pending"),
       ];
-      const ready = await router.getReadyStages(pipeline, stages, "co-1");
+      const ready = await router.getReadyStages(pipeline, stages);
       expect(ready.map((s) => s.id)).not.toContain("write-tests");
     });
 
@@ -184,7 +184,7 @@ describe("IDP pipeline compatibility", () => {
         makeStage("decompose", "completed", { tasks: ["t1", "t2"] }),
         makeStage("write-tests", "pending"),
       ];
-      const ready = await router.getReadyStages(pipeline, stages, "co-1");
+      const ready = await router.getReadyStages(pipeline, stages);
       expect(ready.map((s) => s.id)).toContain("write-tests");
     });
   });
@@ -195,14 +195,14 @@ describe("IDP pipeline compatibility", () => {
       const router = new Router();
 
       const initial = pipeline.stages.map((s) => makeStage(s.id, "pending"));
-      const ready1 = await router.getReadyStages(pipeline, initial, "co-1");
+      const ready1 = await router.getReadyStages(pipeline, initial);
       expect(ready1.map((s) => s.id)).toEqual(["implement"]);
 
       const afterImpl = [
         makeStage("implement", "completed", { status: "done" }),
         makeStage("validate", "pending"),
       ];
-      const ready2 = await router.getReadyStages(pipeline, afterImpl, "co-1");
+      const ready2 = await router.getReadyStages(pipeline, afterImpl);
       expect(ready2.map((s) => s.id)).toEqual(["validate"]);
     });
   });

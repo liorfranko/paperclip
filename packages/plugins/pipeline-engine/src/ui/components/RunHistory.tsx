@@ -2,6 +2,7 @@ import { useState } from "react";
 import { usePluginData, usePluginAction, useHostContext } from "@paperclipai/plugin-sdk/ui";
 import { RunReplayCanvas } from "./RunReplayCanvas.js";
 import { DATA_KEYS, ACTION_KEYS } from "../constants.js";
+import { RUN_STATUS_COLORS } from "../run-status.js";
 import type { PipelineRun, PipelineStage, PipelineDefinition, PipelineRunStatus } from "../../types.js";
 
 interface GetRunResult {
@@ -13,15 +14,6 @@ interface GetRunResult {
 interface ListRunsResult {
   runs: PipelineRun[];
 }
-
-const RUN_STATUS_COLORS: Record<PipelineRunStatus, string> = {
-  running: "#3b82f6",
-  paused: "#f59e0b",
-  completed: "#22c55e",
-  failed: "#ef4444",
-  escalated: "#f97316",
-  cancelled: "#6b7280",
-};
 
 function RunStatusBadge({ status }: { status: PipelineRunStatus }) {
   const color = RUN_STATUS_COLORS[status] ?? "#6b7280";

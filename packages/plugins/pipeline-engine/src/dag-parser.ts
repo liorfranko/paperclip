@@ -1,7 +1,6 @@
 import type { EdgeDefinition, PipelineDefinition, StageDefinition } from "./types.js";
 import { buildAdjacencyFromEdges, getForwardEdges, getLoopEdges } from "./edge-utils.js";
 import { getActionById } from "./action-registry.js";
-import { getDecisionEnumValues, getArrayFieldValues } from "./schema-utils.js";
 
 export interface ValidationResult {
   valid: boolean;
@@ -103,40 +102,6 @@ export function validateDAG(pipeline: PipelineDefinition): ValidationResult {
   return { valid: errors.length === 0, errors };
 }
 
-export function validateCoverage(pipeline: PipelineDefinition): ValidationResult {
-  const errors: string[] = [];
-
-  for (const stage of pipeline.stages) {
-    if (stage.type !== "stage" && stage.type !== "fan_out") continue;
-    if (!("actionId" in stage)) continue;
-    const action = getActionById(stage.actionId);
-    if (!action) continue;
-
-    const outgoingEdges = pipeline.edges.filter((e) => e.from === stage.id && e.type !== "error");
-
-    if (stage.type === "stage") {
-      const enumValues = getDecisionEnumValues(action.outputSchema);
-      if (enumValues.length > 0) {
-        const coveredValues = outgoingEdges.map((e) => e.sourceHandle).filter(Boolean);
-        for (const val of enumValues) {
-          if (!coveredValues.includes(val)) {
-            errors.push(`Stage "${stage.id}": decision value "${val}" has no outgoing edge`);
-          }
-        }
-      }
-    } else if (stage.type === "fan_out" && !action.fixed) {
-      const trackValues = getArrayFieldValues(action.outputSchema, "tracks");
-      const coveredKeys = outgoingEdges.map((e) => e.activationKey).filter(Boolean);
-      for (const val of trackValues) {
-        if (!coveredKeys.includes(val)) {
-          errors.push(`Stage "${stage.id}": track value "${val}" has no outgoing edge`);
-        }
-      }
-    }
-  }
-
-  return { valid: errors.length === 0, errors };
-}
 
 function detectCycle(stages: StageDefinition[], edges: EdgeDefinition[]): string | null {
   const adjacency = buildAdjacencyFromEdges(getForwardEdges(edges));

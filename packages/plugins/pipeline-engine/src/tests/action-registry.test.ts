@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getActionsForType, getActionById, getActionByIdOrThrow, ACTIONS } from "../action-registry.js";
+import { getActionsForType, getActionById, ACTIONS } from "../action-registry.js";
 
 describe("action-registry", () => {
   it("all actions have unique ids", () => {
@@ -48,15 +48,6 @@ describe("action-registry", () => {
     expect(single.every((a) => a.type === "single-decision")).toBe(true);
     const multi = getActionsForType("multi-select");
     expect(multi.every((a) => a.type === "multi-select")).toBe(true);
-  });
-
-  it("getActionByIdOrThrow returns action for valid id", () => {
-    const first = ACTIONS[0];
-    expect(getActionByIdOrThrow(first.id)).toEqual(first);
-  });
-
-  it("getActionByIdOrThrow throws for unknown id", () => {
-    expect(() => getActionByIdOrThrow("nonexistent")).toThrow("ACTION_NOT_FOUND");
   });
 
   it("fixed actions have tracks enum in outputSchema", () => {

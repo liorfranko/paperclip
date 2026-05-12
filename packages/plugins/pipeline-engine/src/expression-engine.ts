@@ -1,4 +1,4 @@
-import type { ExpressionContext, PipelineStage, StageStatus } from "./types.js";
+import type { ExpressionContext, PipelineStage } from "./types.js";
 
 export function buildExpressionContext(
   stages: Pick<PipelineStage, "stageId" | "status" | "output" | "retryCount">[],

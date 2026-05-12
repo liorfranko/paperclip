@@ -10,6 +10,8 @@ import {
 import { usePluginStream } from "@paperclipai/plugin-sdk/ui";
 import { StageNode, type StageNodeData } from "./StageNode.js";
 import { STREAM_CHANNELS } from "../constants.js";
+import { edgeStyleForType } from "../edge-styles.js";
+import { RUN_STATUS_COLORS } from "../run-status.js";
 import type { PipelineDefinition, PipelineRun, PipelineStage, StageStatus } from "../../types.js";
 
 const NODE_TYPES = { stage: StageNode };
@@ -68,7 +70,7 @@ export function RunReplayCanvas({ run, pipeline, initialStages, companyId }: Run
         source: e.from,
         target: e.to,
         label: e.label,
-        style: { stroke: e.type === "error" ? "#ef4444" : "#4b5563", strokeWidth: 2 },
+        style: edgeStyleForType(e.type),
         animated: false,
       })),
     [pipeline.edges],
@@ -93,15 +95,6 @@ export function RunReplayCanvas({ run, pipeline, initialStages, companyId }: Run
     );
   }, [liveStages, setNodes]);
 
-  const runStatusColor: Record<string, string> = {
-    running: "#3b82f6",
-    paused: "#f59e0b",
-    completed: "#22c55e",
-    failed: "#ef4444",
-    escalated: "#f97316",
-    cancelled: "#6b7280",
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Run status bar */}
@@ -120,9 +113,9 @@ export function RunReplayCanvas({ run, pipeline, initialStages, companyId }: Run
         <code style={{ color: "#f9fafb", fontSize: 11 }}>{run.id}</code>
         <div
           style={{
-            background: (runStatusColor[run.status] ?? "#6b7280") + "22",
-            color: runStatusColor[run.status] ?? "#6b7280",
-            border: `1px solid ${runStatusColor[run.status] ?? "#6b7280"}44`,
+            background: (RUN_STATUS_COLORS[run.status] ?? "#6b7280") + "22",
+            color: RUN_STATUS_COLORS[run.status] ?? "#6b7280",
+            border: `1px solid ${RUN_STATUS_COLORS[run.status] ?? "#6b7280"}44`,
             borderRadius: 4,
             fontSize: 10,
             fontWeight: 700,
