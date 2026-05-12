@@ -137,6 +137,43 @@ On action selection, decision handles render at the bottom of the node — one p
 ### Sequential Ordering
 When a Fan Out LLM output returns `ordering: "sequential"`, the router queues activated branches in array order (order of `tracks` values) rather than dispatching all simultaneously.
 
+### Fixed Fan-Out (Deterministic)
+Some fan-out nodes always activate all branches — no LLM decision needed (e.g., dispatching all code reviewers in parallel). For these cases, a multi-select action can be marked `fixed: true`:
+
+```typescript
+interface Action {
+  id: string;
+  name: string;
+  type: ActionType;
+  instructions: string;
+  outputSchema: JSONSchema;
+  fixed?: boolean;  // if true, skip LLM call — activate all tracks
+}
+```
+
+When `fixed: true`, the router skips the LLM invocation and immediately activates all edges from the fan-out node. The `ordering` defaults to `"parallel"`. No agent role is needed on fixed fan-out nodes.
+
+### Retry Overflow Routing
+Loop edges have `max_iterations` to cap retries. When the limit is exceeded, the engine needs to route somewhere (e.g., escalate to human) instead of halting.
+
+New behavior: when a loop edge's `max_iterations` is exceeded, the router fires the **error edge** from that node. If no error edge exists, the pipeline halts with a failure (current behavior).
+
+```typescript
+interface EdgeDefinition {
+  from: string;
+  to: string;
+  sourceHandle?: string;
+  activationKey?: string;
+  type: 'default' | 'error' | 'loop';
+  max_iterations?: number;  // only for loop edges
+}
+```
+
+Example: "Critical Findings?" node has:
+- Loop edge → "Write backend tests" (`max_iterations: 2`, `sourceHandle: "yes-backend"`)
+- Loop edge → "Write frontend tests" (`max_iterations: 2`, `sourceHandle: "yes-frontend"`)
+- Error edge → "Escalate to Human" (fires when any loop edge exceeds max)
+
 ## Validation
 
 - All enum values in an action's output schema must have corresponding edges (exhaustive coverage, same as today).
@@ -168,3 +205,7 @@ When a Fan Out LLM output returns `ordering: "sequential"`, the router queues ac
 - **Instructions:** Based on the spec, determine which teams need to be involved and whether work should happen in parallel or sequentially.
 - **Output schema track values:** `["backend", "frontend"]`
 - **Output schema ordering values:** `["parallel", "sequential"]`
+
+### Dispatch Code Reviews (multi-select, fixed)
+- **Fixed:** `true` — always activates all tracks, no LLM call
+- **Output schema track values:** `["clean-code", "typed-code", "simplify"]`
