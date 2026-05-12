@@ -56,4 +56,24 @@ describe("loop overflow routing", () => {
     const action = router.evaluateLoopOverflow(overflowPipeline, "fix", stageRow, {});
     expect(action).toBeNull();
   });
+
+  it("returns escalate when loop overflows but no error edge exists", () => {
+    const noErrorPipeline: PipelineDefinition = {
+      name: "no-error-overflow",
+      description: "",
+      trigger: { label: "pipeline:noerror" },
+      stages: [
+        { id: "check", type: "stage", agent_role: "reviewer", actionId: "evaluate-critical-findings" },
+        { id: "retry", type: "stage", agent_role: "engineer", actionId: "triage-new-issues" },
+      ],
+      edges: [
+        { id: "e-loop", from: "check", to: "retry", type: "loop", max_iterations: 1 },
+        { id: "e-forward", from: "retry", to: "check" },
+      ],
+      positions: {},
+    };
+    const stageRow = makeStage("check", "completed", {});
+    const action = router.evaluateLoopOverflow(noErrorPipeline, "check", stageRow, { "e-loop": 1 });
+    expect(action).toEqual({ action: "escalate" });
+  });
 });

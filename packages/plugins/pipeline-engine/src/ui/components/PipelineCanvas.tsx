@@ -15,7 +15,7 @@ import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { StagePalette } from "./StagePalette.js";
 import { StageNode, type StageNodeData } from "./StageNode.js";
 import { StageInspector } from "./StageInspector.js";
-import { useAutoLayout } from "../hooks/useAutoLayout.js";
+import { computeAutoLayout } from "../hooks/useAutoLayout.js";
 import { ACTION_KEYS } from "../constants.js";
 import { validatePipeline, ValidationErrorsPanel, type ValidationError } from "./ValidationErrors.js";
 import type { PipelineDefinition, StageDefinition, StageType, EdgeDefinition } from "../../types.js";
@@ -125,10 +125,16 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes as unknown as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges);
 
-  const autoLayout = useAutoLayout;
+  useEffect(() => {
+    setNodes(rfNodes as unknown as Node[]);
+  }, [rfNodes, setNodes]);
+
+  useEffect(() => {
+    setEdges(rfEdges);
+  }, [rfEdges, setEdges]);
 
   const handleAutoLayout = useCallback(() => {
-    const newPositions = autoLayout(nodes, edges);
+    const newPositions = computeAutoLayout(nodes, edges);
     setPositions((prev) => ({ ...prev, ...newPositions }));
     setNodes((nds) =>
       nds.map((n) => ({
@@ -136,7 +142,7 @@ export function PipelineCanvas({ pipeline, companyId, onSaved }: PipelineCanvasP
         position: newPositions[n.id] ?? n.position,
       })),
     );
-  }, [nodes, edges, autoLayout, setNodes]);
+  }, [nodes, edges, setNodes]);
 
   const handleConnect = useCallback(
     (connection: Connection) => {

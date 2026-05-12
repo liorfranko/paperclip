@@ -11,7 +11,7 @@ export interface Action {
   fixed?: boolean;
 }
 
-export const ACTIONS: Action[] = [
+export const ACTIONS: readonly Action[] = [
   {
     id: "triage-new-issues",
     name: "Triage New Issues",
@@ -106,4 +106,12 @@ export function getActionsForType(type: ActionType): Action[] {
 
 export function getActionById(id: string): Action | undefined {
   return ACTIONS.find((a) => a.id === id);
+}
+
+export function getActionByIdOrThrow(id: string): Action {
+  const action = ACTIONS.find((a) => a.id === id);
+  if (!action) {
+    throw new Error(`ACTION_NOT_FOUND: action "${id}" does not exist in the predefined registry`);
+  }
+  return action;
 }

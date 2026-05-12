@@ -122,6 +122,65 @@ describe("router (edge-based)", () => {
       const ready = await router.getReadyStages(fanPipeline, stages, "company-1");
       expect(ready.map((s) => s.id)).not.toContain("join");
     });
+
+    it("fan_in with conditional edges: ready when source resolved and at least one edge satisfied", async () => {
+      const decisionFanInPipeline: PipelineDefinition = {
+        name: "decision-fan-in",
+        description: "",
+        trigger: { label: "dfan" },
+        stages: [
+          { id: "triage", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "feat-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "bug-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "merge", type: "fan_in" },
+        ],
+        edges: [
+          { id: "e1", from: "triage", to: "feat-work", sourceHandle: "feature" },
+          { id: "e2", from: "triage", to: "bug-work", sourceHandle: "bug" },
+          { id: "e3", from: "feat-work", to: "merge" },
+          { id: "e4", from: "bug-work", to: "merge" },
+        ],
+        positions: {},
+      };
+      // triage decided "feature", so feat-work runs and bug-work is skipped
+      const stages = [
+        makeStage("triage", "completed", { decision: "feature" }),
+        makeStage("feat-work", "completed"),
+        makeStage("bug-work", "skipped"),
+        makeStage("merge", "pending"),
+      ];
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      expect(ready.map((s) => s.id)).toContain("merge");
+    });
+
+    it("fan_in with conditional edges: not ready when sources not resolved", async () => {
+      const decisionFanInPipeline: PipelineDefinition = {
+        name: "decision-fan-in",
+        description: "",
+        trigger: { label: "dfan" },
+        stages: [
+          { id: "triage", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "feat-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "bug-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "merge", type: "fan_in" },
+        ],
+        edges: [
+          { id: "e1", from: "triage", to: "feat-work", sourceHandle: "feature" },
+          { id: "e2", from: "triage", to: "bug-work", sourceHandle: "bug" },
+          { id: "e3", from: "feat-work", to: "merge" },
+          { id: "e4", from: "bug-work", to: "merge" },
+        ],
+        positions: {},
+      };
+      const stages = [
+        makeStage("triage", "completed", { decision: "feature" }),
+        makeStage("feat-work", "running"),
+        makeStage("bug-work", "pending"),
+        makeStage("merge", "pending"),
+      ];
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      expect(ready.map((s) => s.id)).not.toContain("merge");
+    });
   });
 
   describe("getSkippedStages", () => {

@@ -59,11 +59,13 @@ export class Router {
 
       if (incomingEdges.length === 0) continue;
 
-      // fan_in: all_complete is the only strategy
+      // fan_in: ready when all sources resolved and all unconditional edges are satisfied.
+      // Conditional edges (sourceHandle/activationKey) are satisfied if they match,
+      // but a non-matching conditional edge from a resolved source does not block readiness.
 
-      // Evaluate which source stages have completed and which edges are satisfied
-      const satisfiedEdges: EdgeDefinition[] = [];
       let allSourcesResolved = true;
+      let hasAnySatisfiedEdge = false;
+      let allUnconditionalSatisfied = true;
 
       for (const edge of incomingEdges) {
         const sourceRow = stageStatusMap.get(edge.from);
@@ -83,7 +85,6 @@ export class Router {
         if (edge.type === "loop") {
           const edgeCount = counts[edge.id] ?? 0;
           if (edgeCount >= (edge.max_iterations ?? 0)) {
-            // Loop exhausted — treat as unsatisfied, but source is resolved
             continue;
           }
         }
@@ -93,22 +94,29 @@ export class Router {
           const sourceOutput = sourceRow.output as Record<string, unknown> | null;
           const tracks = sourceOutput?.tracks;
           if (Array.isArray(tracks) && tracks.includes(edge.activationKey)) {
-            satisfiedEdges.push(edge);
+            hasAnySatisfiedEdge = true;
           }
         } else if (edge.sourceHandle) {
           // sourceHandle-based routing: edge satisfied only if source decision matches
           const sourceOutput = sourceRow.output as Record<string, unknown> | null;
           if (sourceOutput?.decision === edge.sourceHandle) {
-            satisfiedEdges.push(edge);
+            hasAnySatisfiedEdge = true;
           }
         } else {
-          // Unconditional edge with completed source
-          satisfiedEdges.push(edge);
+          // Unconditional edge: must be satisfied for readiness
+          if (sourceCompleted) {
+            hasAnySatisfiedEdge = true;
+          } else {
+            allUnconditionalSatisfied = false;
+          }
         }
       }
 
-      // all_complete: all incoming edges must be satisfied
-      if (allSourcesResolved && satisfiedEdges.length === incomingEdges.length) {
+      const hasConditionalEdges = incomingEdges.some((e) => e.sourceHandle || e.activationKey);
+
+      if (allSourcesResolved && allUnconditionalSatisfied && hasAnySatisfiedEdge) {
+        ready.push(stageDef);
+      } else if (allSourcesResolved && !hasConditionalEdges && allUnconditionalSatisfied && incomingEdges.length > 0) {
         ready.push(stageDef);
       }
     }
@@ -271,7 +279,12 @@ export class Router {
     if (stageDef.type !== "fan_out") return null;
     const action = getActionById(stageDef.actionId);
     if (!action || !action.fixed) return null;
-    const tracks = action.outputSchema.properties?.tracks?.items?.enum ?? [];
+    const tracks = action.outputSchema.properties?.tracks?.items?.enum;
+    if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
+      throw new Error(
+        `SCHEMA_ERROR: Fixed action "${action.id}" has no valid tracks enum in outputSchema`,
+      );
+    }
     return { tracks, ordering: "parallel" };
   }
 }

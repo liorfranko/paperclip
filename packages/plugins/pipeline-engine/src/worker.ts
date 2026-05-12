@@ -148,6 +148,19 @@ async function materializePipeline(
   parentIssueId: string,
   companyId: string,
 ): Promise<void> {
+  // Validate all action references upfront before creating any state
+  for (const stage of pipeline.stages) {
+    if ((stage.type === "stage" || stage.type === "fan_out") && "actionId" in stage && stage.actionId) {
+      const action = getActionById(stage.actionId);
+      if (!action) {
+        ctx.logger.error("Pipeline references unknown action — aborting materialization", {
+          pipelineName: pipeline.name, stageId: stage.id, actionId: stage.actionId,
+        });
+        throw new Error(`Pipeline "${pipeline.name}" stage "${stage.id}" references unknown action "${stage.actionId}"`);
+      }
+    }
+  }
+
   const runId = randomUUID();
   const pipelineJson = JSON.stringify(pipeline);
 
@@ -271,6 +284,30 @@ async function advancePipeline(
         ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "skipped" });
       }
 
+      // Evaluate loop overflow for completed stages with loop edges
+      for (const stageRow of stageRows) {
+        if (stageRow.status !== "completed") continue;
+        const overflowAction = router.evaluateLoopOverflow(pipeline, stageRow.stageId, stageRow, loopEdgeCounts);
+        if (!overflowAction) continue;
+
+        if (overflowAction.action === "escalate") {
+          ctx.logger.warn("Loop overflow — escalating", { runId, stageId: stageRow.stageId });
+          await stateMachine.updateRunStatus(runId, "escalated");
+          ctx.streams.emit("run-progress", { runId, stageId: stageRow.stageId, status: "escalated" });
+          return;
+        }
+
+        if (overflowAction.action === "goto" && overflowAction.targetStageId) {
+          const targetRow = stageRows.find((s) => s.stageId === overflowAction.targetStageId);
+          if (targetRow && targetRow.status === "pending") {
+            ctx.logger.info("Loop overflow — routing to error target", {
+              runId, stageId: stageRow.stageId, targetStageId: overflowAction.targetStageId,
+            });
+            await stateMachine.updateStageStatus(targetRow.id, "pending");
+          }
+        }
+      }
+
       const currentRows = skippedStages.length > 0
         ? await stateMachine.getRunStages(runId)
         : stageRows;
@@ -318,6 +355,7 @@ async function advancePipeline(
           if (!claimed) continue;
           await stateMachine.setStageOutput(stageRow.id, fixedOutput);
           await stateMachine.updateStageStatus(stageRow.id, "completed");
+          ctx.logger.info("Fixed fanout auto-completed", { runId, stageId: stageDef.id, tracks: fixedOutput.tracks });
           ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
           continue;
         }

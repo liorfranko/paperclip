@@ -1,3 +1,4 @@
+import { getActionById } from "../../action-registry.js";
 import type { StageDefinition, EdgeDefinition } from "../../types.js";
 
 export interface ValidationError {
@@ -34,6 +35,13 @@ export function validatePipeline(
 
     if (stage.type === "stage" && !stage.agent_role) {
       errors.push({ stageId: stage.id, field: "agent_role", message: `"${stage.id}" requires an agent role` });
+    }
+
+    if (stage.type === "fan_out" && stage.actionId) {
+      const action = getActionById(stage.actionId);
+      if (!action?.fixed && !stage.agent_role) {
+        errors.push({ stageId: stage.id, field: "agent_role", message: `"${stage.id}" (non-fixed fan-out) requires an agent role` });
+      }
     }
 
     if (stage.type === "sub-pipeline" && !stage.pipeline) {

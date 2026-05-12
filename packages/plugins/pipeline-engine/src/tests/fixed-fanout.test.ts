@@ -41,4 +41,16 @@ describe("fixed fan-out (deterministic)", () => {
     const output = router.getFixedFanoutOutput(stage);
     expect(output).toBeNull();
   });
+
+  it("getFixedFanoutOutput returns null for fan_out with unknown actionId", () => {
+    const stage = { id: "unknown", type: "fan_out" as const, actionId: "nonexistent" };
+    const output = router.getFixedFanoutOutput(stage);
+    expect(output).toBeNull();
+  });
+
+  it("getFixedFanoutOutput returns null for fan_out with non-fixed action", () => {
+    const stage = { id: "dynamic", type: "fan_out" as const, actionId: "plan-tasks", agent_role: "planner" };
+    const output = router.getFixedFanoutOutput(stage);
+    expect(output).toBeNull();
+  });
 });
