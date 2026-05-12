@@ -688,7 +688,9 @@ const plugin = definePlugin({
       const run = await stateMachine.getRun(runId);
       if (!run) return null;
       const stages = await stateMachine.getRunStages(runId);
-      return { run, stages };
+      const pipeline = safeParsePipelineJson(run.pipelineYaml);
+      if (!pipeline) return null;
+      return { run, stages, pipeline };
     });
 
     ctx.data.register("list-agents", async (params) => {
