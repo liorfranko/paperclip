@@ -69,7 +69,7 @@ export const ACTIONS: readonly Action[] = [
     outputSchema: {
       type: "object",
       properties: {
-        decision: { enum: ["no-findings", "yes-backend", "yes-frontend", "max-retries"] },
+        decision: { enum: ["no-findings", "yes-backend", "yes-frontend"] },
       },
     },
   },

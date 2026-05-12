@@ -17,16 +17,19 @@ export class StateMachine {
     return `${this.db.namespace}.${name}`;
   }
 
-  private activeLocks = new Set<string>();
-
   async tryAdvisoryLock(runId: string): Promise<boolean> {
-    if (this.activeLocks.has(runId)) return false;
-    this.activeLocks.add(runId);
-    return true;
+    const rows = await this.db.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+      [runId],
+    );
+    return rows[0]?.locked ?? false;
   }
 
   async releaseAdvisoryLock(runId: string): Promise<void> {
-    this.activeLocks.delete(runId);
+    await this.db.query(
+      `SELECT pg_advisory_unlock(hashtext($1))`,
+      [runId],
+    );
   }
 
   async getLoopEdgeCounts(runId: string): Promise<Record<string, number>> {
@@ -348,13 +351,13 @@ export class StateMachine {
       [runId],
     );
 
-    // Set pending/running stages to skipped and release lock
+    // Set pending/running stages to skipped
     await this.db.execute(
       `UPDATE ${this.table("pipeline_stages")} SET status = 'skipped', completed_at = NOW()
        WHERE pipeline_run_id = $1 AND status IN ('pending', 'running')`,
       [runId],
     );
 
-    this.activeLocks.delete(runId);
+    await this.releaseAdvisoryLock(runId);
   }
 }

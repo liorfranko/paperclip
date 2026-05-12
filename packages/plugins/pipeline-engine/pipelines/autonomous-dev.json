@@ -17,14 +17,14 @@
     { "id": "write-frontend-tests", "type": "stage", "agent_role": "pipe-frontend", "actionId": "write-tests" },
     { "id": "write-frontend-impl", "type": "stage", "agent_role": "pipe-frontend", "actionId": "write-implementation" },
     { "id": "de-slop-frontend", "type": "stage", "agent_role": "pipe-frontend", "actionId": "de-slop-verify" },
-    { "id": "open-pr", "type": "fan_in" },
+    { "id": "sync-impl", "type": "fan_in" },
+    { "id": "open-pr", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "open-pr" },
     { "id": "dispatch-reviews", "type": "fan_out", "actionId": "dispatch-code-reviews" },
     { "id": "review-clean-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
     { "id": "review-typed-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
     { "id": "review-simplify", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
     { "id": "critical-findings", "type": "fan_in" },
     { "id": "evaluate-findings", "type": "stage", "agent_role": "pipe-generic", "actionId": "evaluate-critical-findings" },
-    { "id": "escalate-retries", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
     { "id": "scenario-validator", "type": "stage", "agent_role": "pipe-validator", "actionId": "validate-scenario-result" },
     { "id": "escalate-validation", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
     { "id": "merge", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "merge-pr" }
@@ -45,13 +45,14 @@
 
     { "id": "e-be-tests-impl", "from": "write-backend-tests", "to": "write-backend-impl", "sourceHandle": "done" },
     { "id": "e-be-impl-deslop", "from": "write-backend-impl", "to": "de-slop-backend", "sourceHandle": "done" },
-    { "id": "e-be-deslop-pr", "from": "de-slop-backend", "to": "open-pr", "sourceHandle": "done" },
+    { "id": "e-be-deslop-sync", "from": "de-slop-backend", "to": "sync-impl", "sourceHandle": "done" },
 
     { "id": "e-fe-tests-impl", "from": "write-frontend-tests", "to": "write-frontend-impl", "sourceHandle": "done" },
     { "id": "e-fe-impl-deslop", "from": "write-frontend-impl", "to": "de-slop-frontend", "sourceHandle": "done" },
-    { "id": "e-fe-deslop-pr", "from": "de-slop-frontend", "to": "open-pr", "sourceHandle": "done" },
+    { "id": "e-fe-deslop-sync", "from": "de-slop-frontend", "to": "sync-impl", "sourceHandle": "done" },
 
-    { "id": "e-pr-reviews", "from": "open-pr", "to": "dispatch-reviews" },
+    { "id": "e-sync-pr", "from": "sync-impl", "to": "open-pr" },
+    { "id": "e-pr-reviews", "from": "open-pr", "to": "dispatch-reviews", "sourceHandle": "done" },
 
     { "id": "e-reviews-clean", "from": "dispatch-reviews", "to": "review-clean-code", "activationKey": "clean-code" },
     { "id": "e-reviews-typed", "from": "dispatch-reviews", "to": "review-typed-code", "activationKey": "typed-code" },
@@ -66,7 +67,6 @@
     { "id": "e-findings-no", "from": "evaluate-findings", "to": "scenario-validator", "sourceHandle": "no-findings" },
     { "id": "e-findings-backend", "from": "evaluate-findings", "to": "write-backend-tests", "sourceHandle": "yes-backend", "type": "loop", "max_iterations": 3 },
     { "id": "e-findings-frontend", "from": "evaluate-findings", "to": "write-frontend-tests", "sourceHandle": "yes-frontend", "type": "loop", "max_iterations": 3 },
-    { "id": "e-findings-max", "from": "evaluate-findings", "to": "escalate-retries", "sourceHandle": "max-retries" },
 
     { "id": "e-validator-valid", "from": "scenario-validator", "to": "merge", "sourceHandle": "valid" },
     { "id": "e-validator-invalid", "from": "scenario-validator", "to": "escalate-validation", "sourceHandle": "not-valid" }
@@ -86,14 +86,14 @@
     "write-frontend-tests": { "x": 550, "y": 500 },
     "write-frontend-impl": { "x": 550, "y": 620 },
     "de-slop-frontend": { "x": 550, "y": 740 },
-    "open-pr": { "x": 400, "y": 860 },
-    "dispatch-reviews": { "x": 400, "y": 960 },
+    "sync-impl": { "x": 400, "y": 860 },
+    "open-pr": { "x": 400, "y": 940 },
+    "dispatch-reviews": { "x": 400, "y": 1020 },
     "review-clean-code": { "x": 200, "y": 1060 },
     "review-typed-code": { "x": 400, "y": 1060 },
     "review-simplify": { "x": 600, "y": 1060 },
     "critical-findings": { "x": 400, "y": 1180 },
     "evaluate-findings": { "x": 400, "y": 1280 },
-    "escalate-retries": { "x": 650, "y": 1280 },
     "scenario-validator": { "x": 400, "y": 1400 },
     "escalate-validation": { "x": 650, "y": 1400 },
     "merge": { "x": 400, "y": 1520 }
