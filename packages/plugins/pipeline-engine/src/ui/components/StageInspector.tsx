@@ -1,7 +1,8 @@
 import type { Edge } from "@xyflow/react";
 import { usePluginData, useHostContext } from "@paperclipai/plugin-sdk/ui";
-import type { StageDefinition, StageType, FanInStrategy } from "../../types.js";
+import type { StageDefinition, StageType } from "../../types.js";
 import { DATA_KEYS } from "../constants.js";
+import { getActionsForType, getActionById } from "../../action-registry.js";
 
 interface AgentItem {
   id: string;
@@ -92,7 +93,6 @@ function EdgeInspector({ edge, stageIds, onUpdate, onDelete }: EdgeInspectorProp
 interface StageFormProps {
   stage: StageDefinition;
   agents: AgentItem[];
-  schemas: string[];
   pipelineNames: string[];
   stageIds: string[];
   upstreamStageIds: string[];
@@ -100,7 +100,7 @@ interface StageFormProps {
   onDelete: (id: string) => void;
 }
 
-function StageForm({ stage, agents, schemas, pipelineNames, stageIds, upstreamStageIds, onChange, onDelete }: StageFormProps) {
+function StageForm({ stage, agents, pipelineNames, stageIds, upstreamStageIds, onChange, onDelete }: StageFormProps) {
   const update = (patch: Partial<StageDefinition>) =>
     onChange({ ...stage, ...patch } as StageDefinition, patch.id !== undefined ? stage.id : undefined);
 
@@ -147,43 +147,49 @@ function StageForm({ stage, agents, schemas, pipelineNames, stageIds, upstreamSt
       )}
 
       {(stage.type === "stage" || stage.type === "fan_out") && (
-        <FieldGroup label="Output Schema">
+        <FieldGroup label="Action">
           <select
             style={selectStyle}
-            value={stage.output_schema ?? ""}
-            onChange={(e) => update({ output_schema: e.target.value || undefined } as Partial<StageDefinition>)}
+            value={"actionId" in stage ? (stage as any).actionId ?? "" : ""}
+            onChange={(e) => update({ actionId: e.target.value || undefined } as any)}
           >
-            <option value="">— No schema —</option>
-            {schemas.map((s) => (
-              <option key={s} value={s}>{s}</option>
+            <option value="">— Select action —</option>
+            {getActionsForType(stage.type === "stage" ? "single-decision" : "multi-select").map((a) => (
+              <option key={a.id} value={a.id}>{a.name}{a.fixed ? " (fixed)" : ""}</option>
             ))}
           </select>
         </FieldGroup>
       )}
 
-      {(stage.type === "stage" || stage.type === "fan_out") && (
-        <FieldGroup label="Instructions">
-          <textarea
-            style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
-            value={"instructions" in stage ? (stage.instructions ?? "") : ""}
-            onChange={(e) => update({ instructions: e.target.value || undefined } as any)}
-            placeholder="Agent instructions..."
-          />
-        </FieldGroup>
-      )}
+      {(stage.type === "stage" || stage.type === "fan_out") && (() => {
+        const actionId = "actionId" in stage ? (stage as any).actionId : undefined;
+        const action = actionId ? getActionById(actionId) : undefined;
+        if (!action) return null;
+        return (
+          <>
+            {action.instructions && (
+              <FieldGroup label="Instructions (read-only)">
+                <div style={{ ...inputStyle, background: "#0f172a", color: "#9ca3af", minHeight: 60, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical" }}>
+                  {action.instructions}
+                </div>
+              </FieldGroup>
+            )}
+            <FieldGroup label="Output values">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {(action.outputSchema.properties?.decision?.enum ?? action.outputSchema.properties?.tracks?.items?.enum ?? []).map((v: string) => (
+                  <span key={v} style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 4, padding: "2px 6px", fontSize: 11, color: "#94a3b8" }}>{v}</span>
+                ))}
+              </div>
+            </FieldGroup>
+          </>
+        );
+      })()}
 
       {stage.type === "fan_in" && (
-        <FieldGroup label="Fan-In Strategy">
-          <select
-            style={selectStyle}
-            value={(stage as { fan_in_strategy?: FanInStrategy }).fan_in_strategy ?? "all_complete"}
-            onChange={(e) =>
-              update({ fan_in_strategy: e.target.value as FanInStrategy } as Partial<StageDefinition>)
-            }
-          >
-            <option value="all_complete">All Complete</option>
-            <option value="first_complete">First Complete</option>
-          </select>
+        <FieldGroup label="Fan-In Behavior">
+          <div style={{ ...inputStyle, background: "#0f172a", color: "#9ca3af" }}>
+            Waits for all active branches to complete
+          </div>
         </FieldGroup>
       )}
 
@@ -202,7 +208,7 @@ function StageForm({ stage, agents, schemas, pipelineNames, stageIds, upstreamSt
         </FieldGroup>
       )}
 
-      {(stage.type === "sub-pipeline" || stage.type === "fan_out") && (
+      {stage.type === "sub-pipeline" && (
         <>
           <FieldGroup label="Per Task">
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
@@ -265,10 +271,8 @@ export function StageInspector({
 }: StageInspectorProps) {
   const { companyId } = useHostContext();
   const { data: agentsData } = usePluginData<ListAgentsResult>(DATA_KEYS.LIST_AGENTS, { companyId });
-  const { data: schemasData } = usePluginData<{ schemas: string[] }>(DATA_KEYS.LIST_SCHEMAS, {});
   const { data: pipelinesData } = usePluginData<{ pipelines: { name: string }[] }>(DATA_KEYS.LIST_PIPELINES, {});
   const agents = agentsData?.agents ?? [];
-  const schemas = schemasData?.schemas ?? [];
   const pipelineNames = (pipelinesData?.pipelines ?? []).map((p) => p.name).filter((n) => n !== currentPipelineName);
 
   return (
@@ -290,7 +294,6 @@ export function StageInspector({
         <StageForm
           stage={selectedStage}
           agents={agents}
-          schemas={schemas}
           pipelineNames={pipelineNames}
           stageIds={stageIds}
           upstreamStageIds={edgeDefs.filter((e) => e.to === selectedStage.id).map((e) => e.from)}

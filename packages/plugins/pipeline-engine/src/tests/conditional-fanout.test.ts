@@ -22,11 +22,11 @@ const fanOutPipeline: PipelineDefinition = {
   description: "",
   trigger: { label: "pipeline:fanout" },
   stages: [
-    { id: "plan", type: "stage", agent_role: "planner" },
-    { id: "backend", type: "stage", agent_role: "backend-dev" },
-    { id: "frontend", type: "stage", agent_role: "frontend-dev" },
-    { id: "infra", type: "stage", agent_role: "infra-eng" },
-    { id: "merge", type: "fan_in", fan_in_strategy: "all_complete" },
+    { id: "plan", type: "stage", agent_role: "planner", actionId: "plan-tasks" },
+    { id: "backend", type: "stage", agent_role: "backend-dev", actionId: "triage-new-issues" },
+    { id: "frontend", type: "stage", agent_role: "frontend-dev", actionId: "triage-new-issues" },
+    { id: "infra", type: "stage", agent_role: "infra-eng", actionId: "triage-new-issues" },
+    { id: "merge", type: "fan_in" },
   ],
   edges: [
     { id: "e1", from: "plan", to: "backend", activationKey: "backend" },

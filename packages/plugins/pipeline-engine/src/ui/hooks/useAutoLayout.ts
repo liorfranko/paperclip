@@ -4,11 +4,7 @@ import type { Node, Edge } from "@xyflow/react";
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 90;
 
-/**
- * Compute dagre-based auto-layout positions for the given nodes and edges.
- * Returns a Record mapping node id to {x, y} top-left coordinates.
- */
-export function useAutoLayout(
+export function computeAutoLayout(
   nodes: Node[],
   edges: Edge[],
 ): Record<string, { x: number; y: number }> {

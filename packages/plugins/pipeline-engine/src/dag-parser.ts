@@ -1,5 +1,7 @@
 import type { EdgeDefinition, PipelineDefinition, StageDefinition } from "./types.js";
 import { buildAdjacencyFromEdges, getForwardEdges, getLoopEdges } from "./edge-utils.js";
+import { getActionById } from "./action-registry.js";
+import { getDecisionEnumValues, getArrayFieldValues } from "./schema-utils.js";
 
 export interface ValidationResult {
   valid: boolean;
@@ -78,6 +80,58 @@ export function validateDAG(pipeline: PipelineDefinition): ValidationResult {
   for (const edge of getLoopEdges(pipeline.edges)) {
     if (!edge.max_iterations || edge.max_iterations <= 0) {
       errors.push(`loop edge "${edge.id}" must have max_iterations > 0`);
+    }
+  }
+
+  // Validate actionId presence on Stage and FanOut
+  for (const stage of pipeline.stages) {
+    if ((stage.type === "stage" || stage.type === "fan_out") && !("actionId" in stage && stage.actionId)) {
+      errors.push(`Stage "${stage.id}" has no action selected`);
+    }
+  }
+
+  // Validate action references
+  for (const stage of pipeline.stages) {
+    if (stage.type !== "stage" && stage.type !== "fan_out") continue;
+    if (!("actionId" in stage)) continue;
+    const action = getActionById(stage.actionId);
+    if (!action) {
+      errors.push(`Stage "${stage.id}" references unknown action "${stage.actionId}"`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateCoverage(pipeline: PipelineDefinition): ValidationResult {
+  const errors: string[] = [];
+
+  for (const stage of pipeline.stages) {
+    if (stage.type !== "stage" && stage.type !== "fan_out") continue;
+    if (!("actionId" in stage)) continue;
+    const action = getActionById(stage.actionId);
+    if (!action) continue;
+
+    const outgoingEdges = pipeline.edges.filter((e) => e.from === stage.id && e.type !== "error");
+
+    if (stage.type === "stage") {
+      const enumValues = getDecisionEnumValues(action.outputSchema);
+      if (enumValues.length > 0) {
+        const coveredValues = outgoingEdges.map((e) => e.sourceHandle).filter(Boolean);
+        for (const val of enumValues) {
+          if (!coveredValues.includes(val)) {
+            errors.push(`Stage "${stage.id}": decision value "${val}" has no outgoing edge`);
+          }
+        }
+      }
+    } else if (stage.type === "fan_out" && !action.fixed) {
+      const trackValues = getArrayFieldValues(action.outputSchema, "tracks");
+      const coveredKeys = outgoingEdges.map((e) => e.activationKey).filter(Boolean);
+      for (const val of trackValues) {
+        if (!coveredKeys.includes(val)) {
+          errors.push(`Stage "${stage.id}": track value "${val}" has no outgoing edge`);
+        }
+      }
     }
   }
 

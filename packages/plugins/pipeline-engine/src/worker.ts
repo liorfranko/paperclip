@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,11 +8,12 @@ import {
   type PluginContext,
   type PluginEvent,
 } from "@paperclipai/plugin-sdk";
+import { getActionById } from "./action-registry.js";
 import { parsePipeline, validateDAG } from "./dag-parser.js";
 import { Dispatcher } from "./dispatcher.js";
 import { buildExpressionContext } from "./expression-engine.js";
 import { buildAdjacencyFromEdges, getForwardEdges } from "./edge-utils.js";
-import { extractOutput, loadSchema, validateOutput } from "./output-parser.js";
+import { extractOutput, validateOutput } from "./output-parser.js";
 import { Router } from "./router.js";
 import { StateMachine } from "./state-machine.js";
 import { TriggerMatcher } from "./trigger-matcher.js";
@@ -72,6 +73,33 @@ async function loadPipelines(ctx: PluginContext): Promise<PipelineDefinition[]> 
   return loaded;
 }
 
+const BUNDLED_PIPELINES = ["autonomous-dev"];
+
+async function seedBundledPipelines(ctx: PluginContext): Promise<void> {
+  const registry = await getPipelineRegistry(ctx);
+  const workerDir = dirname(fileURLToPath(import.meta.url));
+  const pipelinesDir = resolve(workerDir, "..", "pipelines");
+
+  for (const name of BUNDLED_PIPELINES) {
+    if (registry.includes(name)) continue;
+    try {
+      const content = readFileSync(resolve(pipelinesDir, `${name}.json`), "utf8");
+      const pipeline = parsePipeline(content);
+      const validation = validateDAG(pipeline);
+      if (!validation.valid) {
+        ctx.logger.warn("Bundled pipeline invalid, skipping seed", { name, errors: validation.errors });
+        continue;
+      }
+      await ctx.state.set({ scopeKind: "instance", namespace: "pipeline", stateKey: `pipeline:${name}` }, content);
+      await ctx.state.set(PIPELINE_REGISTRY_KEY, [...registry, name]);
+      registry.push(name);
+      ctx.logger.info("Seeded bundled pipeline", { name });
+    } catch (err) {
+      ctx.logger.warn("Failed to seed bundled pipeline", { name, error: String(err) });
+    }
+  }
+}
+
 async function buildStageContext(
   ctx: PluginContext,
   parentIssueId: string,
@@ -103,6 +131,12 @@ async function buildStageContext(
     if (upstreamOutputs.length > 0) {
       sections.push(`## Upstream Stage Results\n\n${upstreamOutputs.join("\n\n")}`);
     }
+  }
+
+  const actionId = "actionId" in stageDef ? stageDef.actionId : undefined;
+  const action = actionId ? getActionById(actionId) : undefined;
+  if (action?.instructions) {
+    sections.push(`## Task Instructions\n\n${action.instructions}`);
   }
 
   return sections.join("\n\n---\n\n");
@@ -144,6 +178,19 @@ async function materializePipeline(
   parentIssueId: string,
   companyId: string,
 ): Promise<void> {
+  // Validate all action references upfront before creating any state
+  for (const stage of pipeline.stages) {
+    if ((stage.type === "stage" || stage.type === "fan_out") && "actionId" in stage && stage.actionId) {
+      const action = getActionById(stage.actionId);
+      if (!action) {
+        ctx.logger.error("Pipeline references unknown action — aborting materialization", {
+          pipelineName: pipeline.name, stageId: stage.id, actionId: stage.actionId,
+        });
+        throw new Error(`Pipeline "${pipeline.name}" stage "${stage.id}" references unknown action "${stage.actionId}"`);
+      }
+    }
+  }
+
   const runId = randomUUID();
   const pipelineJson = JSON.stringify(pipeline);
 
@@ -267,6 +314,30 @@ async function advancePipeline(
         ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "skipped" });
       }
 
+      // Evaluate loop overflow for completed stages with loop edges
+      for (const stageRow of stageRows) {
+        if (stageRow.status !== "completed") continue;
+        const overflowAction = router.evaluateLoopOverflow(pipeline, stageRow.stageId, stageRow, loopEdgeCounts);
+        if (!overflowAction) continue;
+
+        if (overflowAction.action === "escalate") {
+          ctx.logger.warn("Loop overflow — escalating", { runId, stageId: stageRow.stageId });
+          await stateMachine.updateRunStatus(runId, "escalated");
+          ctx.streams.emit("run-progress", { runId, stageId: stageRow.stageId, status: "escalated" });
+          return;
+        }
+
+        if (overflowAction.action === "goto" && overflowAction.targetStageId) {
+          const targetRow = stageRows.find((s) => s.stageId === overflowAction.targetStageId);
+          if (targetRow && targetRow.status === "pending") {
+            ctx.logger.info("Loop overflow — routing to error target", {
+              runId, stageId: stageRow.stageId, targetStageId: overflowAction.targetStageId,
+            });
+            await stateMachine.updateStageStatus(targetRow.id, "pending");
+          }
+        }
+      }
+
       const currentRows = skippedStages.length > 0
         ? await stateMachine.getRunStages(runId)
         : stageRows;
@@ -305,6 +376,17 @@ async function advancePipeline(
         const stageRow = currentRows.find((s) => s.stageId === stageDef.id);
         if (!stageRow) {
           ctx.logger.error("Ready stage has no DB row", { runId, stageId: stageDef.id });
+          continue;
+        }
+
+        const fixedOutput = router.getFixedFanoutOutput(stageDef);
+        if (fixedOutput) {
+          const claimed = await stateMachine.claimStageForDispatch(stageRow.id);
+          if (!claimed) continue;
+          await stateMachine.setStageOutput(stageRow.id, fixedOutput);
+          await stateMachine.updateStageStatus(stageRow.id, "completed");
+          ctx.logger.info("Fixed fanout auto-completed", { runId, stageId: stageDef.id, tracks: fixedOutput.tracks });
+          ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
           continue;
         }
 
@@ -421,21 +503,10 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
     return;
   }
 
-  const outputSchema = "output_schema" in stageDef ? stageDef.output_schema : undefined;
-  if (outputSchema) {
-    let schema: object;
-    try {
-      schema = loadSchema(outputSchema);
-    } catch (err) {
-      ctx.logger.error("Failed to load schema", { schema: outputSchema, error: String(err) });
-      await stateMachine.setStageError(stageRow.id, `Schema load failed: ${String(err)}`);
-      await stateMachine.updateStageStatus(stageRow.id, "failed");
-      ctx.streams.emit("run-progress", { runId: run.id, stageId: stageRow.stageId, status: "failed" });
-      await handleStageFailure(ctx, stageRow.pipelineRunId, pipeline, stageDef, stageRow.id, run.companyId);
-      return;
-    }
-
-    const validation = validateOutput(output, schema);
+  const actionId = "actionId" in stageDef ? stageDef.actionId : undefined;
+  const action = actionId ? getActionById(actionId) : undefined;
+  if (action?.outputSchema) {
+    const validation = validateOutput(output, action.outputSchema);
     if (!validation.valid) {
       await stateMachine.setStageError(stageRow.id, `malformed output: ${validation.error}`);
       await stateMachine.updateStageStatus(stageRow.id, "failed");
@@ -598,6 +669,7 @@ const plugin = definePlugin({
     dispatcher = new Dispatcher(ctx.issues as any, config.role_mapping ?? {}, ctx.manifest.id, ctx.agents as any);
     router = new Router();
 
+    await seedBundledPipelines(ctx);
     pipelines = await loadPipelines(ctx);
     triggerMatcher = new TriggerMatcher(pipelines);
 
@@ -649,53 +721,6 @@ const plugin = definePlugin({
       if (!companyId) return { agents: [] };
       const agents = await ctx.agents.list({ companyId });
       return { agents };
-    });
-
-    ctx.data.register("list-schemas", async () => {
-      const candidates = [
-        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
-      ];
-      for (const dir of candidates) {
-        try {
-          const files = readdirSync(dir);
-          const schemas = files
-            .filter((f) => f.endsWith(".json"))
-            .map((f) => f.replace(/\.json$/, ""));
-          if (schemas.length > 0) return { schemas };
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-            ctx.logger.warn("Failed to read schemas directory", { dir, error: String(err) });
-          }
-        }
-      }
-      return { schemas: [] };
-    });
-
-    ctx.data.register("list-schema-contents", async () => {
-      const candidates = [
-        resolve(dirname(fileURLToPath(import.meta.url)), "../schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "./schemas"),
-        resolve(dirname(fileURLToPath(import.meta.url)), "../../schemas"),
-      ];
-      for (const dir of candidates) {
-        try {
-          const files = readdirSync(dir);
-          const schemas: Record<string, unknown> = {};
-          for (const f of files) {
-            if (!f.endsWith(".json")) continue;
-            const content = readFileSync(resolve(dir, f), "utf-8");
-            schemas[f.replace(/\.json$/, "")] = JSON.parse(content);
-          }
-          if (Object.keys(schemas).length > 0) return { schemas };
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-            ctx.logger.warn("Failed to read schema contents", { dir, error: String(err) });
-          }
-        }
-      }
-      return { schemas: {} };
     });
 
     // Action handlers for UI

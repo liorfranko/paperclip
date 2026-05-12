@@ -28,7 +28,7 @@ describe("dispatcher", () => {
   });
 
   it("creates a sub-issue for a worker stage", async () => {
-    const stage: StageDefinition = { id: "implement", type: "stage", agent_role: "code-writer" };
+    const stage: StageDefinition = { id: "implement", type: "stage", agent_role: "code-writer", actionId: "triage-new-issues" };
     const result = await dispatcher.dispatch({
       pipelineRunId: "run-1",
       stage,
@@ -43,20 +43,20 @@ describe("dispatcher", () => {
   });
 
   it("throws CONFIGURATION_ERROR for unknown role", async () => {
-    const stage: StageDefinition = { id: "unknown", type: "stage", agent_role: "nonexistent-role" };
+    const stage: StageDefinition = { id: "unknown", type: "stage", agent_role: "nonexistent-role", actionId: "triage-new-issues" };
     await expect(
       dispatcher.dispatch({ pipelineRunId: "run-1", stage, companyId: "company-1", parentIssueId: "parent-1" }),
     ).rejects.toThrow("CONFIGURATION_ERROR");
   });
 
   it("requests wakeup after creating issue", async () => {
-    const stage: StageDefinition = { id: "review", type: "stage", agent_role: "spec-reviewer" };
+    const stage: StageDefinition = { id: "review", type: "stage", agent_role: "spec-reviewer", actionId: "triage-new-issues" };
     await dispatcher.dispatch({ pipelineRunId: "run-1", stage, companyId: "company-1", parentIssueId: "parent-1" });
     expect(issues.requestWakeup).toHaveBeenCalledOnce();
   });
 
   it("includes failure context in retry dispatch", async () => {
-    const stage: StageDefinition = { id: "implement", type: "stage", agent_role: "code-writer" };
+    const stage: StageDefinition = { id: "implement", type: "stage", agent_role: "code-writer", actionId: "triage-new-issues" };
     await dispatcher.dispatch({
       pipelineRunId: "run-1",
       stage,
@@ -66,5 +66,35 @@ describe("dispatcher", () => {
     });
     const createCall = issues.create.mock.calls[0][0];
     expect(createCall.description).toContain("Fix validation failures");
+  });
+
+  it("includes output schema in dispatched issue description", async () => {
+    const stage: StageDefinition = { id: "triage", type: "stage", agent_role: "code-writer", actionId: "triage-new-issues" };
+    await dispatcher.dispatch({
+      pipelineRunId: "run-1",
+      stage,
+      companyId: "company-1",
+      parentIssueId: "parent-1",
+    });
+    const createCall = issues.create.mock.calls[0][0];
+    expect(createCall.description).toContain("Required Schema");
+    expect(createCall.description).toContain('"enum"');
+    expect(createCall.description).toContain("feature");
+    expect(createCall.description).toContain("bug");
+    expect(createCall.description).toContain("fast-track");
+  });
+
+  it("includes output format section even without action schema", async () => {
+    const stage: StageDefinition = { id: "noaction", type: "fan_out", actionId: "" };
+    const noActionDispatcher = new Dispatcher(issues as any, {}, "paperclipai.pipeline-engine");
+    await noActionDispatcher.dispatch({
+      pipelineRunId: "run-1",
+      stage,
+      companyId: "company-1",
+      parentIssueId: "parent-1",
+    });
+    const createCall = issues.create.mock.calls[0][0];
+    expect(createCall.description).toContain("Output Format");
+    expect(createCall.description).not.toContain("Required Schema");
   });
 });

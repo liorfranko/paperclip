@@ -1,9 +1,7 @@
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parsePipeline, validateDAG } from "../dag-parser.js";
 import { Dispatcher } from "../dispatcher.js";
-import { extractOutput, validateOutput, loadSchema, setSchemasDir } from "../output-parser.js";
+import { extractOutput } from "../output-parser.js";
 import { Router } from "../router.js";
 import { TriggerMatcher } from "../trigger-matcher.js";
 import type { PipelineStage } from "../types.js";
@@ -13,9 +11,9 @@ const FEATURE_JSON = JSON.stringify({
   description: "Full feature development",
   trigger: { label: "pipeline:feature" },
   stages: [
-    { id: "spec-review", type: "stage", agent_role: "spec-reviewer", output_schema: "spec-review-output" },
-    { id: "implement", type: "stage", agent_role: "code-writer" },
-    { id: "validate", type: "stage", agent_role: "validator" },
+    { id: "spec-review", type: "stage", agent_role: "spec-reviewer", actionId: "validate-spec" },
+    { id: "implement", type: "stage", agent_role: "code-writer", actionId: "triage-new-issues" },
+    { id: "validate", type: "stage", agent_role: "validator", actionId: "triage-new-issues" },
   ],
   edges: [
     { id: "e1", from: "spec-review", to: "implement", sourceHandle: "approved" },
@@ -35,11 +33,6 @@ function createMockIssues() {
 }
 
 describe("integration: end-to-end pipeline flow", () => {
-  beforeAll(() => {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    setSchemasDir(resolve(__dirname, "../../schemas"));
-  });
-
   it("triggers pipeline, dispatches stages, processes output, and advances", async () => {
     const pipeline = parsePipeline(FEATURE_JSON);
     const validation = validateDAG(pipeline);
@@ -82,10 +75,6 @@ describe("integration: end-to-end pipeline flow", () => {
     expect(extraction.found).toBe(true);
     expect(extraction.data).not.toBeNull();
     expect(extraction.data!.decision).toBe("approved");
-
-    const schema = loadSchema("spec-review-output");
-    const validated = validateOutput(extraction.data!, schema);
-    expect(validated.valid).toBe(true);
 
     // After spec-review completes with decision: "approved", implement should be ready
     const afterSpecReview: PipelineStage[] = [

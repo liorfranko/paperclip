@@ -9,13 +9,13 @@ const FEATURE_JSON: PipelineDefinition = {
   description: "Full feature development pipeline",
   trigger: { label: "pipeline:feature" },
   stages: [
-    { id: "spec-review", type: "stage", agent_role: "spec-reviewer" },
-    { id: "decompose", type: "stage", agent_role: "decomposer" },
-    { id: "write-tests", type: "fan_out", agent_role: "test-writer", per_task: true, ordering: "from_output" },
-    { id: "implement", type: "fan_out", agent_role: "implementer", per_task: true, ordering: "from_output" },
-    { id: "validate", type: "fan_in", fan_in_strategy: "all_complete" },
-    { id: "review", type: "fan_out", agent_role: "reviewer" },
-    { id: "merge-gate", type: "fan_in", fan_in_strategy: "all_complete" },
+    { id: "spec-review", type: "stage", agent_role: "spec-reviewer", actionId: "validate-spec" },
+    { id: "decompose", type: "stage", agent_role: "decomposer", actionId: "triage-new-issues" },
+    { id: "write-tests", type: "fan_out", agent_role: "test-writer", actionId: "plan-tasks" },
+    { id: "implement", type: "fan_out", agent_role: "implementer", actionId: "plan-tasks" },
+    { id: "validate", type: "fan_in" },
+    { id: "review", type: "fan_out", agent_role: "reviewer", actionId: "plan-tasks" },
+    { id: "merge-gate", type: "fan_in" },
   ],
   edges: [
     { id: "e1", from: "spec-review", to: "decompose", sourceHandle: "approved" },
@@ -34,10 +34,10 @@ const BUG_JSON: PipelineDefinition = {
   description: "Bug fix pipeline",
   trigger: { label: "pipeline:bug" },
   stages: [
-    { id: "write-tests", type: "stage", agent_role: "test-writer" },
-    { id: "implement", type: "stage", agent_role: "implementer" },
-    { id: "validate", type: "stage", agent_role: "validator" },
-    { id: "review", type: "stage", agent_role: "reviewer" },
+    { id: "write-tests", type: "stage", agent_role: "test-writer", actionId: "triage-new-issues" },
+    { id: "implement", type: "stage", agent_role: "implementer", actionId: "triage-new-issues" },
+    { id: "validate", type: "stage", agent_role: "validator", actionId: "triage-new-issues" },
+    { id: "review", type: "stage", agent_role: "reviewer", actionId: "triage-new-issues" },
   ],
   edges: [
     { id: "e1", from: "write-tests", to: "implement" },
@@ -53,8 +53,8 @@ const FAST_TRACK_JSON: PipelineDefinition = {
   description: "Fast-track pipeline for trivial changes",
   trigger: { label: "pipeline:fast-track" },
   stages: [
-    { id: "implement", type: "stage", agent_role: "implementer" },
-    { id: "validate", type: "stage", agent_role: "validator" },
+    { id: "implement", type: "stage", agent_role: "implementer", actionId: "triage-new-issues" },
+    { id: "validate", type: "stage", agent_role: "validator", actionId: "triage-new-issues" },
   ],
   edges: [
     { id: "e1", from: "implement", to: "validate" },
@@ -144,7 +144,7 @@ describe("IDP pipeline compatibility", () => {
   describe("router handles fan_out stages", () => {
     it("marks fan_out as requiring agent dispatch", () => {
       const router = new Router();
-      expect(router.requiresAgentDispatch({ id: "review", type: "fan_out", agent_role: "reviewer" })).toBe(true);
+      expect(router.requiresAgentDispatch({ id: "review", type: "fan_out", agent_role: "reviewer", actionId: "plan-tasks" })).toBe(true);
     });
 
     it("includes fan_out in ready stages when deps met", async () => {

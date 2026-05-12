@@ -1,5 +1,5 @@
 import type { CreateIssueInput, DispatchRequest, RoleMapping, WakeupOptions } from "./types.js";
-import { loadSchema } from "./output-parser.js";
+import { getActionById } from "./action-registry.js";
 
 export interface AgentsClient {
   list(input: { companyId: string; status?: string; limit?: number; offset?: number }): Promise<Array<{ id: string; name: string }>>;
@@ -39,8 +39,9 @@ export class Dispatcher {
 
     const agentId = agentRole ? await this.resolveAgent(agentRole, companyId) : undefined;
 
-    const outputSchema = "output_schema" in stage ? stage.output_schema : undefined;
-    const outputInstructions = this.buildOutputInstructions(outputSchema);
+    const actionId = "actionId" in stage ? stage.actionId : undefined;
+    const action = actionId ? getActionById(actionId) : undefined;
+    const outputInstructions = this.buildOutputInstructions(action?.outputSchema);
 
     const description = context
       ? `## Pipeline Stage: ${stage.id}\n\n${context}${outputInstructions}`
@@ -96,19 +97,12 @@ export class Dispatcher {
     return agentId;
   }
 
-  private buildOutputInstructions(outputSchema: string | undefined): string {
+  private buildOutputInstructions(outputSchema: object | undefined): string {
     const format = `\n\n---\n### Output Format\nWhen you have completed this task, post a comment containing your structured result in this exact format:\n\n\`\`\`\n<!-- pipeline-output -->\n\\\`\\\`\\\`json\n{ ... your JSON result ... }\n\\\`\\\`\\\`\n\`\`\``;
 
     if (!outputSchema) return format;
 
-    let schemaJson: string;
-    try {
-      const schema = loadSchema(outputSchema);
-      schemaJson = JSON.stringify(schema, null, 2);
-    } catch {
-      return `${format}\n\nThe JSON must conform to schema: \`${outputSchema}\``;
-    }
-
-    return `${format}\n\n### Required Schema: \`${outputSchema}\`\n\n\`\`\`json\n${schemaJson}\n\`\`\``;
+    const schemaJson = JSON.stringify(outputSchema, null, 2);
+    return `${format}\n\n### Required Schema\n\n\`\`\`json\n${schemaJson}\n\`\`\``;
   }
 }

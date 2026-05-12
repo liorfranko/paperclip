@@ -1,3 +1,4 @@
+import { getActionById } from "../../action-registry.js";
 import type { StageDefinition, EdgeDefinition } from "../../types.js";
 
 export interface ValidationError {
@@ -11,7 +12,6 @@ export function validatePipeline(
   name: string,
   stages: StageDefinition[],
   edges: EdgeDefinition[],
-  decisionMap?: Record<string, string[]>,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
@@ -37,6 +37,13 @@ export function validatePipeline(
       errors.push({ stageId: stage.id, field: "agent_role", message: `"${stage.id}" requires an agent role` });
     }
 
+    if (stage.type === "fan_out" && stage.actionId) {
+      const action = getActionById(stage.actionId);
+      if (!action?.fixed && !stage.agent_role) {
+        errors.push({ stageId: stage.id, field: "agent_role", message: `"${stage.id}" (non-fixed fan-out) requires an agent role` });
+      }
+    }
+
     if (stage.type === "sub-pipeline" && !stage.pipeline) {
       errors.push({ stageId: stage.id, field: "pipeline", message: `"${stage.id}" requires a pipeline reference` });
     }
@@ -54,29 +61,6 @@ export function validatePipeline(
     }
     if (edge.type === "loop" && (!edge.max_iterations || edge.max_iterations <= 0)) {
       errors.push({ edgeId: edge.id, field: "max_iterations", message: `Loop edge "${edge.id}" must have max_iterations > 0` });
-    }
-  }
-
-  if (decisionMap) {
-    for (const stage of stages) {
-      if (stage.type !== "stage") continue;
-      const schemaName = stage.output_schema;
-      if (!schemaName) continue;
-      const enumValues = decisionMap[schemaName];
-      if (!enumValues || enumValues.length === 0) continue;
-
-      const outgoingEdges = edges.filter((e) => e.from === stage.id && e.type !== "error");
-      const coveredValues = new Set(outgoingEdges.map((e) => e.sourceHandle).filter(Boolean));
-
-      for (const value of enumValues) {
-        if (!coveredValues.has(value)) {
-          errors.push({
-            stageId: stage.id,
-            field: "edges",
-            message: `Missing outgoing edge for decision "${value}" on "${stage.id}"`,
-          });
-        }
-      }
     }
   }
 

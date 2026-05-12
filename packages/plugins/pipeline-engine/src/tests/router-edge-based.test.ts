@@ -22,10 +22,10 @@ const featurePipeline: PipelineDefinition = {
   description: "",
   trigger: { label: "pipeline:feature" },
   stages: [
-    { id: "spec-review", type: "stage", agent_role: "spec-reviewer" },
-    { id: "decompose", type: "stage", agent_role: "decomposer" },
-    { id: "implement", type: "stage", agent_role: "code-writer" },
-    { id: "validate", type: "stage", agent_role: "validator" },
+    { id: "spec-review", type: "stage", agent_role: "spec-reviewer", actionId: "triage-new-issues" },
+    { id: "decompose", type: "stage", agent_role: "decomposer", actionId: "triage-new-issues" },
+    { id: "implement", type: "stage", agent_role: "code-writer", actionId: "triage-new-issues" },
+    { id: "validate", type: "stage", agent_role: "validator", actionId: "triage-new-issues" },
   ],
   edges: [
     { id: "e1", from: "spec-review", to: "decompose", sourceHandle: "approved" },
@@ -85,7 +85,7 @@ describe("router (edge-based)", () => {
       const pipelineWithSubPipeline: PipelineDefinition = {
         ...featurePipeline,
         stages: [
-          { id: "start", type: "stage", agent_role: "worker" },
+          { id: "start", type: "stage", agent_role: "worker", actionId: "triage-new-issues" },
           { id: "sub", type: "sub-pipeline", pipeline: "other" },
         ],
         edges: [{ id: "e1", from: "start", to: "sub" }],
@@ -98,40 +98,15 @@ describe("router (edge-based)", () => {
       expect(ready.map((s) => s.id)).not.toContain("sub");
     });
 
-    it("handles fan_in with first_complete strategy: ready when any source completes", async () => {
+    it("handles fan_in: waits for all sources", async () => {
       const fanPipeline: PipelineDefinition = {
         name: "fan",
         description: "",
         trigger: { label: "fan" },
         stages: [
-          { id: "a", type: "stage", agent_role: "r" },
-          { id: "b", type: "stage", agent_role: "r" },
-          { id: "join", type: "fan_in", fan_in_strategy: "first_complete" },
-        ],
-        edges: [
-          { id: "e1", from: "a", to: "join" },
-          { id: "e2", from: "b", to: "join" },
-        ],
-        positions: {},
-      };
-      const stages = [
-        makeStage("a", "completed"),
-        makeStage("b", "pending"),
-        makeStage("join", "pending"),
-      ];
-      const ready = await router.getReadyStages(fanPipeline, stages, "company-1");
-      expect(ready.map((s) => s.id)).toContain("join");
-    });
-
-    it("handles fan_in with all_complete strategy: waits for all sources", async () => {
-      const fanPipeline: PipelineDefinition = {
-        name: "fan",
-        description: "",
-        trigger: { label: "fan" },
-        stages: [
-          { id: "a", type: "stage", agent_role: "r" },
-          { id: "b", type: "stage", agent_role: "r" },
-          { id: "join", type: "fan_in", fan_in_strategy: "all_complete" },
+          { id: "a", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "b", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "join", type: "fan_in" },
         ],
         edges: [
           { id: "e1", from: "a", to: "join" },
@@ -146,6 +121,65 @@ describe("router (edge-based)", () => {
       ];
       const ready = await router.getReadyStages(fanPipeline, stages, "company-1");
       expect(ready.map((s) => s.id)).not.toContain("join");
+    });
+
+    it("fan_in with conditional edges: ready when source resolved and at least one edge satisfied", async () => {
+      const decisionFanInPipeline: PipelineDefinition = {
+        name: "decision-fan-in",
+        description: "",
+        trigger: { label: "dfan" },
+        stages: [
+          { id: "triage", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "feat-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "bug-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "merge", type: "fan_in" },
+        ],
+        edges: [
+          { id: "e1", from: "triage", to: "feat-work", sourceHandle: "feature" },
+          { id: "e2", from: "triage", to: "bug-work", sourceHandle: "bug" },
+          { id: "e3", from: "feat-work", to: "merge" },
+          { id: "e4", from: "bug-work", to: "merge" },
+        ],
+        positions: {},
+      };
+      // triage decided "feature", so feat-work runs and bug-work is skipped
+      const stages = [
+        makeStage("triage", "completed", { decision: "feature" }),
+        makeStage("feat-work", "completed"),
+        makeStage("bug-work", "skipped"),
+        makeStage("merge", "pending"),
+      ];
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      expect(ready.map((s) => s.id)).toContain("merge");
+    });
+
+    it("fan_in with conditional edges: not ready when sources not resolved", async () => {
+      const decisionFanInPipeline: PipelineDefinition = {
+        name: "decision-fan-in",
+        description: "",
+        trigger: { label: "dfan" },
+        stages: [
+          { id: "triage", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "feat-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "bug-work", type: "stage", agent_role: "r", actionId: "triage-new-issues" },
+          { id: "merge", type: "fan_in" },
+        ],
+        edges: [
+          { id: "e1", from: "triage", to: "feat-work", sourceHandle: "feature" },
+          { id: "e2", from: "triage", to: "bug-work", sourceHandle: "bug" },
+          { id: "e3", from: "feat-work", to: "merge" },
+          { id: "e4", from: "bug-work", to: "merge" },
+        ],
+        positions: {},
+      };
+      const stages = [
+        makeStage("triage", "completed", { decision: "feature" }),
+        makeStage("feat-work", "running"),
+        makeStage("bug-work", "pending"),
+        makeStage("merge", "pending"),
+      ];
+      const ready = await router.getReadyStages(decisionFanInPipeline, stages, "company-1");
+      expect(ready.map((s) => s.id)).not.toContain("merge");
     });
   });
 
@@ -208,13 +242,13 @@ describe("router (edge-based)", () => {
       expect(router.requiresAgentDispatch(stage)).toBe(true);
     });
 
-    it("returns true for fan_out type", () => {
-      const stage = { id: "fan", type: "fan_out" as const, agent_role: "r" };
+    it("returns true for fan_out type with non-fixed action", () => {
+      const stage = { id: "fan", type: "fan_out" as const, agent_role: "r", actionId: "plan-tasks" };
       expect(router.requiresAgentDispatch(stage)).toBe(true);
     });
 
     it("returns false for fan_in type", () => {
-      const stage = { id: "join", type: "fan_in" as const, fan_in_strategy: "all_complete" as const };
+      const stage = { id: "join", type: "fan_in" as const };
       expect(router.requiresAgentDispatch(stage)).toBe(false);
     });
 

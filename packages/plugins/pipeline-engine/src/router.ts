@@ -1,3 +1,4 @@
+import { getActionById } from "./action-registry.js";
 import { getIncomingEdges, getErrorEdges, getRootStageIds, getLoopEdges } from "./edge-utils.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "./types.js";
 
@@ -58,13 +59,13 @@ export class Router {
 
       if (incomingEdges.length === 0) continue;
 
-      // Determine fan_in strategy
-      const fanInStrategy = stageDef.type === "fan_in" ? stageDef.fan_in_strategy : undefined;
-      const useFirstComplete = fanInStrategy === "first_complete";
+      // fan_in: ready when all sources resolved and all unconditional edges are satisfied.
+      // Conditional edges (sourceHandle/activationKey) are satisfied if they match,
+      // but a non-matching conditional edge from a resolved source does not block readiness.
 
-      // Evaluate which source stages have completed and which edges are satisfied
-      const satisfiedEdges: EdgeDefinition[] = [];
       let allSourcesResolved = true;
+      let hasAnySatisfiedEdge = false;
+      let allUnconditionalSatisfied = true;
 
       for (const edge of incomingEdges) {
         const sourceRow = stageStatusMap.get(edge.from);
@@ -84,7 +85,6 @@ export class Router {
         if (edge.type === "loop") {
           const edgeCount = counts[edge.id] ?? 0;
           if (edgeCount >= (edge.max_iterations ?? 0)) {
-            // Loop exhausted — treat as unsatisfied, but source is resolved
             continue;
           }
         }
@@ -94,30 +94,30 @@ export class Router {
           const sourceOutput = sourceRow.output as Record<string, unknown> | null;
           const tracks = sourceOutput?.tracks;
           if (Array.isArray(tracks) && tracks.includes(edge.activationKey)) {
-            satisfiedEdges.push(edge);
+            hasAnySatisfiedEdge = true;
           }
         } else if (edge.sourceHandle) {
           // sourceHandle-based routing: edge satisfied only if source decision matches
           const sourceOutput = sourceRow.output as Record<string, unknown> | null;
           if (sourceOutput?.decision === edge.sourceHandle) {
-            satisfiedEdges.push(edge);
+            hasAnySatisfiedEdge = true;
           }
         } else {
-          // Unconditional edge with completed source
-          satisfiedEdges.push(edge);
+          // Unconditional edge: must be satisfied for readiness
+          if (sourceCompleted) {
+            hasAnySatisfiedEdge = true;
+          } else {
+            allUnconditionalSatisfied = false;
+          }
         }
       }
 
-      if (useFirstComplete) {
-        // Ready if any satisfied edge exists
-        if (satisfiedEdges.length > 0) {
-          ready.push(stageDef);
-        }
-      } else {
-        // all_complete (default): all incoming edges must be satisfied
-        if (allSourcesResolved && satisfiedEdges.length === incomingEdges.length) {
-          ready.push(stageDef);
-        }
+      const hasConditionalEdges = incomingEdges.some((e) => e.sourceHandle || e.activationKey);
+
+      if (allSourcesResolved && allUnconditionalSatisfied && hasAnySatisfiedEdge) {
+        ready.push(stageDef);
+      } else if (allSourcesResolved && !hasConditionalEdges && allUnconditionalSatisfied && incomingEdges.length > 0) {
+        ready.push(stageDef);
       }
     }
 
@@ -240,6 +240,51 @@ export class Router {
   }
 
   requiresAgentDispatch(stageDef: StageDefinition): boolean {
+    if (stageDef.type === "fan_out") {
+      const action = getActionById(stageDef.actionId);
+      if (action?.fixed) return false;
+    }
     return stageDef.type === "stage" || stageDef.type === "fan_out";
+  }
+
+  evaluateLoopOverflow(
+    pipeline: PipelineDefinition,
+    stageId: string,
+    _stageRow: PipelineStage,
+    loopEdgeCounts: Record<string, number>,
+  ): FailureAction | null {
+    const edges = pipeline.edges ?? [];
+    const loopEdgesFromStage = edges.filter(
+      (e) => e.from === stageId && e.type === "loop",
+    );
+
+    if (loopEdgesFromStage.length === 0) return null;
+
+    const overflowed = loopEdgesFromStage.some((e) => {
+      const count = loopEdgeCounts[e.id] ?? 0;
+      return count >= (e.max_iterations ?? 0);
+    });
+
+    if (!overflowed) return null;
+
+    const errorEdges = getErrorEdges(edges).filter((e) => e.from === stageId);
+    if (errorEdges.length === 0) {
+      return { action: "escalate" };
+    }
+
+    return { action: "goto", targetStageId: errorEdges[0].to };
+  }
+
+  getFixedFanoutOutput(stageDef: StageDefinition): Record<string, unknown> | null {
+    if (stageDef.type !== "fan_out") return null;
+    const action = getActionById(stageDef.actionId);
+    if (!action || !action.fixed) return null;
+    const tracks = action.outputSchema.properties?.tracks?.items?.enum;
+    if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
+      throw new Error(
+        `SCHEMA_ERROR: Fixed action "${action.id}" has no valid tracks enum in outputSchema`,
+      );
+    }
+    return { tracks, ordering: "parallel" };
   }
 }
