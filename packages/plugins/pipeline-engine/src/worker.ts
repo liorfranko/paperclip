@@ -288,17 +288,17 @@ async function advancePipeline(
   );
   const projectId = parentIssueForProject?.projectId ?? undefined;
 
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    const run = await stateMachine.getRun(runId);
-    if (!run || run.status !== "running") return;
+  const locked = await stateMachine.tryAdvisoryLock(runId);
+  if (!locked) {
+    ctx.logger.debug("Pipeline advancement already in progress", { runId });
+    return;
+  }
 
-    const locked = await stateMachine.tryAdvisoryLock(runId);
-    if (!locked) {
-      ctx.logger.debug("Pipeline advancement already in progress", { runId });
-      return;
-    }
+  try {
+    for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      const run = await stateMachine.getRun(runId);
+      if (!run || run.status !== "running") return;
 
-    try {
       const stageRows = await stateMachine.getRunStages(runId);
       const loopEdgeCounts = await stateMachine.getLoopEdgeCounts(runId);
 
@@ -362,6 +362,8 @@ async function advancePipeline(
         return;
       }
 
+      let hasAutoCompleted = false;
+
       for (const stageDef of readyStages) {
         const stageRow = currentRows.find((s) => s.stageId === stageDef.id);
         if (!stageRow) {
@@ -377,6 +379,7 @@ async function advancePipeline(
           await stateMachine.updateStageStatus(stageRow.id, "completed");
           ctx.logger.info("Fixed fanout auto-completed", { runId, stageId: stageDef.id, tracks: fixedOutput.tracks });
           ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
+          hasAutoCompleted = true;
           continue;
         }
 
@@ -386,6 +389,7 @@ async function advancePipeline(
           await stateMachine.updateStageStatus(stageRow.id, "completed");
           ctx.logger.info("Fan-in sync point auto-completed", { runId, stageId: stageDef.id });
           ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
+          hasAutoCompleted = true;
           continue;
         }
 
@@ -434,15 +438,17 @@ async function advancePipeline(
         }
       }
 
-      return;
-    } finally {
-      await stateMachine.releaseAdvisoryLock(runId);
+      // If stages auto-completed (fan_out/fan_in), loop to check newly-ready downstream stages.
+      // Otherwise we dispatched to agents — exit and wait for their output to trigger next advancement.
+      if (!hasAutoCompleted) return;
     }
-  }
 
-  ctx.logger.error("Pipeline advancement hit iteration limit — possible infinite loop", { runId });
-  await stateMachine.updateRunStatus(runId, "failed");
-  ctx.streams.emit("run-progress", { runId, stageId: null, status: "failed" });
+    ctx.logger.error("Pipeline advancement hit iteration limit — possible infinite loop", { runId });
+    await stateMachine.updateRunStatus(runId, "failed");
+    ctx.streams.emit("run-progress", { runId, stageId: null, status: "failed" });
+  } finally {
+    await stateMachine.releaseAdvisoryLock(runId);
+  }
 }
 
 
