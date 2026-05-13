@@ -37,6 +37,13 @@ export const STAGE_TYPES: StageTypeMeta[] = [
     color: "#22c55e",
     badge: "SUB",
   },
+  {
+    type: "block",
+    label: "Block",
+    description: "Halts the pipeline until manually unblocked",
+    color: "#f59e0b",
+    badge: "BLK",
+  },
 ];
 
 export function getStageColor(type: string): string {

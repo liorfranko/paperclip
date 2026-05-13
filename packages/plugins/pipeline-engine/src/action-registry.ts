@@ -47,6 +47,32 @@ export const ACTIONS: readonly Action[] = [
     },
   },
   {
+    id: "create-spec",
+    name: "Create Spec",
+    type: "single-decision",
+    instructions:
+      "Create a design spec for this feature issue using the **brainstorming** skill.\n\n" +
+      "Follow the brainstorming skill process exactly:\n" +
+      "1. Read the issue description and triage comments\n" +
+      "2. Read `governance/MISSION.md` and `governance/ENGINEERING.md` for alignment and standards\n" +
+      "3. Check existing specs in `docs/specs/` for prior art and conventions\n" +
+      "4. Assess scope — if multiple independent subsystems, decompose into sub-issues first\n" +
+      "5. Analyze requirements: purpose, constraints, success criteria, dependencies\n" +
+      "6. Explore 2-3 technical approaches with pros/cons\n" +
+      "7. Write the design spec to `docs/specs/` following the brainstorming skill template\n" +
+      "8. Self-review against mission alignment, spec quality, and engineering standards\n" +
+      "9. Commit and push the spec\n\n" +
+      "The spec MUST include: Goal, Background, Approach (with alternatives considered), " +
+      "Requirements (Backend API, Frontend, Performance), API Contract, and Definition of Done.\n\n" +
+      "Output 'done' when the spec is committed and pushed.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done"] },
+      },
+    },
+  },
+  {
     id: "validate-spec",
     name: "Validate Spec",
     type: "single-decision",

@@ -125,6 +125,7 @@ function StageForm({ stage, agents, pipelineNames, onChange, onDelete }: StageFo
           <option value="fan_out">Fan Out</option>
           <option value="fan_in">Fan In</option>
           <option value="sub-pipeline">Sub-Pipeline</option>
+          <option value="block">Block</option>
         </select>
       </FieldGroup>
 
@@ -231,6 +232,17 @@ function StageForm({ stage, agents, pipelineNames, onChange, onDelete }: StageFo
             </select>
           </FieldGroup>
         </>
+      )}
+
+      {stage.type === "block" && (
+        <FieldGroup label="Reason">
+          <textarea
+            style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
+            value={"reason" in stage ? (stage as any).reason ?? "" : ""}
+            onChange={(e) => update({ reason: e.target.value } as any)}
+            placeholder="Why is the pipeline blocked?"
+          />
+        </FieldGroup>
       )}
 
       <button

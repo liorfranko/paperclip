@@ -33,6 +33,8 @@ function stageDefaults(type: StageType, id: string): StageDefinition {
       return { id, type: "fan_in" };
     case "sub-pipeline":
       return { id, type: "sub-pipeline", pipeline: "" };
+    case "block":
+      return { id, type: "block", reason: "" };
   }
 }
 

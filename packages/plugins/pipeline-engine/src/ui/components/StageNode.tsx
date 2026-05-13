@@ -37,6 +37,7 @@ export function StageNode({ data, selected, id }: NodeProps) {
       : getArrayFieldValues(action.outputSchema, "tracks")
     : [];
   const instructions = action?.instructions;
+  const blockReason = stage.type === "block" && "reason" in stage ? (stage as any).reason : undefined;
   const hasDecisionHandles = decisionValues && decisionValues.length > 0;
   const typeColor = getStageColor(stage.type);
   const badge = getStageBadge(stage.type);
@@ -134,6 +135,20 @@ export function StageNode({ data, selected, id }: NodeProps) {
             WebkitBoxOrient: "vertical",
           }}>
             {instructions}
+          </div>
+        )}
+        {blockReason && (
+          <div style={{
+            color: "#f59e0b",
+            fontSize: 10,
+            lineHeight: 1.3,
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            fontStyle: "italic",
+          }}>
+            ⛔ {blockReason}
           </div>
         )}
       </div>
