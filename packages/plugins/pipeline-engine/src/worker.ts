@@ -528,12 +528,27 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
 
   ctx.logger.info("Stage completed", { stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId });
 
+  if (isBlockingDecision(output)) {
+    ctx.logger.warn("Stage output contains blocking decision — escalating to human", {
+      stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId, decision: output.decision,
+    });
+    await stateMachine.updateRunStatus(stageRow.pipelineRunId, "escalated");
+    ctx.streams.emit("run-progress", { runId: run.id, stageId: stageRow.stageId, status: "escalated" });
+    return;
+  }
+
   if (stageDef.checkpoint) {
     await handleCheckpointCompletion(ctx, stageRow.pipelineRunId, pipeline, stageDef, output, run.companyId);
     return;
   }
 
   await advancePipeline(ctx, stageRow.pipelineRunId, pipeline, run.companyId);
+}
+
+const BLOCKING_DECISIONS = new Set(["ci-blocked", "escalated", "needs-human"]);
+
+function isBlockingDecision(output: Record<string, unknown>): boolean {
+  return typeof output.decision === "string" && BLOCKING_DECISIONS.has(output.decision);
 }
 
 function safeParsePipelineJson(content: unknown): PipelineDefinition | null {

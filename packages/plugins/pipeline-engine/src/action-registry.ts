@@ -28,7 +28,7 @@ export const ACTIONS: readonly Action[] = [
     id: "validate-scenario",
     name: "Validate Scenario",
     type: "single-decision",
-    instructions: "Verify that a valid holdout scenario exists for this issue. Check the scenarios directory for a matching YAML file. If found and well-formed, output 'yes'. If missing or invalid, output 'no'.",
+    instructions: "Verify that a valid holdout scenario exists for this issue. Check the `.paperclip/scenarios/` directory for a matching YAML file (match by scenario name referenced in the issue description, or by listing available scenarios). If a relevant scenario file exists and is well-formed YAML with steps and satisfaction_criteria, output 'yes'. If missing or invalid, output 'no'.",
     outputSchema: {
       type: "object",
       properties: {
@@ -162,11 +162,15 @@ export const ACTIONS: readonly Action[] = [
     id: "merge-pr",
     name: "Merge PR",
     type: "single-decision",
-    instructions: "Merge the pull request after all reviews and validations have passed. Ensure CI is green and no blocking comments remain. Output 'done' when merged.",
+    instructions:
+      "Before merging, run `gh pr checks` and verify EVERY check has status 'pass'. " +
+      "If ANY check is pending or failing, you MUST NOT merge. " +
+      "Output 'ci-blocked' and stop — a human will handle it. " +
+      "Only output 'done' after confirming all CI checks are green AND merging successfully.",
     outputSchema: {
       type: "object",
       properties: {
-        decision: { enum: ["done"] },
+        decision: { enum: ["done", "ci-blocked"] },
       },
     },
   },
