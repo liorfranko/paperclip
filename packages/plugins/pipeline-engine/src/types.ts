@@ -2,7 +2,7 @@ export type PipelineRunStatus = "running" | "paused" | "completed" | "failed" | 
 
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
-export type StageType = "stage" | "fan_out" | "fan_in" | "sub-pipeline";
+export type StageType = "stage" | "fan_out" | "fan_in" | "sub-pipeline" | "block";
 
 interface BaseStage {
   id: string;
@@ -32,7 +32,12 @@ export interface SubPipelineStage extends BaseStage {
   ordering?: string;
 }
 
-export type StageDefinition = Stage | FanOutStage | FanInStage | SubPipelineStage;
+export interface BlockStage extends BaseStage {
+  type: "block";
+  reason: string;
+}
+
+export type StageDefinition = Stage | FanOutStage | FanInStage | SubPipelineStage | BlockStage;
 
 export interface PipelineTrigger {
   label: string;

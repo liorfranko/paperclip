@@ -7,9 +7,9 @@
     { "id": "bug-triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
     { "id": "fast-track-triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
     { "id": "valid-scenario", "type": "stage", "agent_role": "pipe-generic", "actionId": "validate-scenario" },
-    { "id": "escalate-scenario", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "escalate-scenario", "type": "block", "reason": "No holdout scenario found for this feature. Add a scenario YAML to `.paperclip/scenarios/` and unblock to resume." },
     { "id": "valid-spec", "type": "stage", "agent_role": "pipe-generic", "actionId": "validate-spec" },
-    { "id": "escalate-spec", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "escalate-spec", "type": "block", "reason": "Design spec missing or incomplete. Add a spec to `docs/specs/` covering architecture, data flow, error handling, testing, and Definition of Done, then unblock to resume." },
     { "id": "plan-tasks", "type": "fan_out", "agent_role": "pipe-generic", "actionId": "plan-tasks" },
     { "id": "write-backend-tests", "type": "stage", "agent_role": "pipe-backend", "actionId": "write-tests" },
     { "id": "write-backend-impl", "type": "stage", "agent_role": "pipe-backend", "actionId": "write-implementation" },
@@ -26,7 +26,7 @@
     { "id": "critical-findings", "type": "fan_in" },
     { "id": "evaluate-findings", "type": "stage", "agent_role": "pipe-generic", "actionId": "evaluate-critical-findings" },
     { "id": "scenario-validator", "type": "stage", "agent_role": "pipe-validator", "actionId": "validate-scenario-result" },
-    { "id": "escalate-validation", "type": "stage", "agent_role": "pipe-generic", "actionId": "escalate-to-human" },
+    { "id": "escalate-validation", "type": "block", "reason": "Scenario validation failed after maximum retries. Manual intervention required — review implementation and holdout scenario." },
     { "id": "merge", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "merge-pr" }
   ],
   "edges": [

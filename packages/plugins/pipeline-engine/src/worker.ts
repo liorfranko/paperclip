@@ -141,6 +141,26 @@ async function buildStageContext(
   return sections.join("\n\n---\n\n");
 }
 
+async function handleIssueUnblock(ctx: PluginContext, event: PluginEvent): Promise<void> {
+  const issueId = event.entityId;
+  if (!issueId) return;
+
+  const issue = await ctx.issues.get(issueId, event.companyId);
+  if (!issue || issue.status === "blocked") return;
+
+  const pausedRun = await stateMachine.getPausedRunForIssue(issueId, event.companyId);
+  if (!pausedRun) return;
+
+  const pipeline = safeParsePipelineJson(pausedRun.pipelineYaml);
+  if (!pipeline) return;
+
+  await stateMachine.updateRunStatus(pausedRun.id, "running");
+  ctx.logger.info("Pipeline resumed after unblock", { runId: pausedRun.id, issueId });
+  ctx.streams.emit("run-progress", { runId: pausedRun.id, stageId: null, status: "running" });
+
+  await advancePipeline(ctx, pausedRun.id, pipeline, event.companyId);
+}
+
 async function handleIssueEvent(ctx: PluginContext, event: PluginEvent): Promise<void> {
   const issueId = event.entityId;
   if (!issueId) return;
@@ -391,6 +411,25 @@ async function advancePipeline(
           ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
           hasAutoCompleted = true;
           continue;
+        }
+
+        if (stageDef.type === "block") {
+          const claimed = await stateMachine.claimStageForDispatch(stageRow.id);
+          if (!claimed) continue;
+          await stateMachine.updateStageStatus(stageRow.id, "completed");
+          ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
+
+          await ctx.issues.update(run.parentIssueId, { status: "blocked" }, companyId);
+          await ctx.issues.createComment(
+            run.parentIssueId,
+            `⏸️ Pipeline blocked at stage \`${stageDef.id}\`:\n\n${stageDef.reason}\n\nUnblock the issue to resume the pipeline.`,
+            companyId,
+            {},
+          );
+          await stateMachine.updateRunStatus(runId, "paused");
+          ctx.logger.info("Pipeline blocked", { runId, stageId: stageDef.id, reason: stageDef.reason });
+          ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "paused" });
+          return;
         }
 
         if (!router.requiresAgentDispatch(stageDef)) {
@@ -817,6 +856,7 @@ const plugin = definePlugin({
 
     ctx.events.on("issue.updated", async (event: PluginEvent) => {
       try {
+        await handleIssueUnblock(ctx, event);
         await handleIssueEvent(ctx, event);
       } catch (err) {
         ctx.logger.error("Unhandled error in issue.updated handler", {
