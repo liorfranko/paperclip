@@ -1,0 +1,13 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "severity": { "enum": ["critical", "major", "minor"] },
+      "file": { "type": "string" },
+      "line": { "type": "integer" },
+      "description": { "type": "string" },
+      "suggestion": { "type": "string" }
+    }
+  }
+}

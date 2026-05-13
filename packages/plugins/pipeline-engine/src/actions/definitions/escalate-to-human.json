@@ -1,0 +1,13 @@
+{
+  "id": "escalate-to-human",
+  "name": "Escalate to Human",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Escalate this issue to a human operator.\n\nPost a comment summarizing:\n- What was attempted and what failed\n- Why automated resolution isn't possible (e.g., ambiguous spec, infra issue, auth problem)\n- What specific decision or action is needed from a human\n\nThen output 'escalated'.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["escalated"] }
+    }
+  }
+}

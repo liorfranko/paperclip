@@ -2,7 +2,7 @@ import type { Edge } from "@xyflow/react";
 import { usePluginData, useHostContext } from "@paperclipai/plugin-sdk/ui";
 import type { StageDefinition, StageType } from "../../types.js";
 import { DATA_KEYS } from "../constants.js";
-import { getActionsForType, getActionById } from "../../action-registry.js";
+import { getActionsForType, getActionById } from "../../actions/index.js";
 
 interface AgentItem {
   id: string;

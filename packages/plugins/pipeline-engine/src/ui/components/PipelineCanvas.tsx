@@ -1,25 +1,27 @@
 import xyflowStyles from "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  addEdge,
-  useNodesState,
-  useEdgesState,
+  applyNodeChanges,
+  applyEdgeChanges,
   type Node,
   type Edge,
   type Connection,
+  type NodeChange,
+  type EdgeChange,
 } from "@xyflow/react";
 import { usePluginAction } from "@paperclipai/plugin-sdk/ui";
 import { StagePalette } from "./StagePalette.js";
-import { StageNode, type StageNodeData } from "./StageNode.js";
+import { StageNode } from "./StageNode.js";
 import { StageInspector } from "./StageInspector.js";
+import { PipelineToolbar } from "./PipelineToolbar.js";
 import { computeAutoLayout } from "../hooks/useAutoLayout.js";
+import { usePipelineState } from "../hooks/usePipelineState.js";
 import { ACTION_KEYS } from "../constants.js";
-import { edgeStyleForType } from "../edge-styles.js";
-import { validatePipeline, ValidationErrorsPanel, type ValidationError } from "./ValidationErrors.js";
-import type { PipelineDefinition, StageDefinition, StageType, EdgeDefinition } from "../../types.js";
+import { validatePipeline, ValidationErrorsPanel, type ValidationError, type ValidationWarning } from "./ValidationErrors.js";
+import type { PipelineDefinition, StageDefinition, StageType } from "../../types.js";
 
 const NODE_TYPES = { stage: StageNode };
 
@@ -62,92 +64,57 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Stages as mutable state
-  const [stages, setStages] = useState<StageDefinition[]>(pipeline.stages ?? []);
-  const [edgeDefs, setEdgeDefs] = useState<EdgeDefinition[]>(pipeline.edges ?? []);
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(
-    pipeline.positions ?? {},
-  );
+  // Single source of truth for pipeline graph state
+  const {
+    stages, edgeDefs, rfNodes, rfEdges,
+    selectedStageId, selectedEdgeId,
+    setSelectedStageId, setSelectedEdgeId,
+    handleNodeSelect,
+    addStage, removeStage, updateStage,
+    addEdge, removeEdge, updateEdge,
+    moveNode, setAllPositions,
+  } = usePipelineState(pipeline);
 
-  // Selection state
-  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  // Apply all ReactFlow changes (dimensions, select, etc.) and sync position back to canonical state
+  const [nodes, setNodes] = useState<Node[]>(rfNodes);
+  const [edges, setEdges] = useState<Edge[]>(rfEdges);
 
-  const handleNodeSelect = useCallback((id: string) => {
-    setSelectedStageId(id);
-    setSelectedEdgeId(null);
-  }, []);
+  // Sync from canonical state → RF state when stages/edges/positions change
+  useEffect(() => { setNodes(rfNodes); }, [rfNodes]);
+  useEffect(() => { setEdges(rfEdges); }, [rfEdges]);
 
-  // Build RF nodes/edges from canonical state
-  const rfNodes = useMemo(() =>
-    stages.map((stage) => ({
-      id: stage.id,
-      type: "stage" as const,
-      position: positions[stage.id] ?? { x: 0, y: 0 },
-      data: { stage, onSelect: handleNodeSelect } as unknown as StageNodeData,
-    })),
-    [stages, positions, selectedStageId, handleNodeSelect],
-  );
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes(nds => applyNodeChanges(changes, nds));
+    for (const change of changes) {
+      if (change.type === "position" && change.position && !change.dragging) {
+        moveNode(change.id, change.position);
+      }
+    }
+  }, [moveNode]);
 
-  const rfEdges = useMemo<Edge[]>(() =>
-    edgeDefs.map((e) => ({
-      id: e.id,
-      source: e.from,
-      target: e.to,
-      sourceHandle: e.sourceHandle ?? null,
-      label: e.sourceHandle ?? e.label,
-      data: { type: e.type, sourceHandle: e.sourceHandle, activationKey: e.activationKey, max_iterations: e.max_iterations },
-      style: edgeStyleForType(e.type),
-      selected: e.id === selectedEdgeId,
-    })),
-    [edgeDefs, selectedEdgeId],
-  );
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    setEdges(eds => applyEdgeChanges(changes, eds));
+    for (const change of changes) {
+      if (change.type === "remove") {
+        removeEdge(change.id);
+      }
+    }
+  }, [removeEdge]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes as unknown as Node[]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges);
-
-  useEffect(() => {
-    setNodes(rfNodes as unknown as Node[]);
-  }, [rfNodes, setNodes]);
-
-  useEffect(() => {
-    setEdges(rfEdges);
-  }, [rfEdges, setEdges]);
+  const handleConnect = useCallback((connection: Connection) => {
+    addEdge({
+      id: `e-${connection.source}-${connection.target}-${Date.now()}`,
+      from: connection.source ?? "",
+      to: connection.target ?? "",
+      type: "default",
+      sourceHandle: connection.sourceHandle ?? undefined,
+    });
+  }, [addEdge]);
 
   const handleAutoLayout = useCallback(() => {
     const newPositions = computeAutoLayout(nodes, edges);
-    setPositions((prev) => ({ ...prev, ...newPositions }));
-    setNodes((nds) =>
-      nds.map((n) => ({
-        ...n,
-        position: newPositions[n.id] ?? n.position,
-      })),
-    );
-  }, [nodes, edges, setNodes]);
-
-  const handleConnect = useCallback(
-    (connection: Connection) => {
-      const newEdge: EdgeDefinition = {
-        id: `e-${connection.source}-${connection.target}-${Date.now()}`,
-        from: connection.source ?? "",
-        to: connection.target ?? "",
-        type: "default",
-        sourceHandle: connection.sourceHandle ?? undefined,
-      };
-      setEdgeDefs((prev) => [...prev, newEdge]);
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...connection,
-            id: newEdge.id,
-            style: edgeStyleForType("default"),
-          },
-          eds,
-        ),
-      );
-    },
-    [setEdges],
-  );
+    setAllPositions(newPositions);
+  }, [nodes, edges, setAllPositions]);
 
   const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[]; edges: Edge[] }) => {
     if (selectedNodes.length === 1) {
@@ -156,21 +123,17 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
     } else if (selectedNodes.length === 0) {
       setSelectedStageId(null);
     }
-  }, []);
+  }, [setSelectedStageId, setSelectedEdgeId]);
 
   const handleEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
     setSelectedEdgeId(edge.id);
     setSelectedStageId(null);
-  }, []);
+  }, [setSelectedEdgeId, setSelectedStageId]);
 
   const handlePaneClick = useCallback(() => {
     setSelectedStageId(null);
     setSelectedEdgeId(null);
-  }, []);
-
-  const handleNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
-    setPositions((prev) => ({ ...prev, [node.id]: node.position }));
-  }, []);
+  }, [setSelectedStageId, setSelectedEdgeId]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -179,27 +142,14 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
       if (!type) return;
       const id = `${type}-${nodeSeq++}`;
       const newStage = stageDefaults(type, id);
-
-      // Calculate drop position relative to canvas
       const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const pos = {
         x: e.clientX - bounds.left - 100,
         y: e.clientY - bounds.top - 45,
       };
-
-      setStages((prev) => [...prev, newStage]);
-      setPositions((prev) => ({ ...prev, [id]: pos }));
-      setNodes((nds) => [
-        ...nds,
-        {
-          id,
-          type: "stage" as const,
-          position: pos,
-          data: { stage: newStage, onSelect: handleNodeSelect } as unknown as StageNodeData,
-        } as unknown as Node,
-      ]);
+      addStage(newStage, pos);
     },
-    [setNodes, handleNodeSelect],
+    [addStage],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -207,100 +157,18 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
     e.dataTransfer.dropEffect = "copy";
   }, []);
 
-  const handleStageChange = useCallback((updated: StageDefinition, oldId?: string) => {
-    const prevId = oldId ?? updated.id;
-    const newId = updated.id;
-    const idChanged = prevId !== newId;
-
-    setStages((prev) => prev.map((s) => (s.id === prevId ? updated : s)));
-
-    if (idChanged) {
-      setEdgeDefs((prev) =>
-        prev.map((e) => ({
-          ...e,
-          id: e.id.replace(prevId, newId),
-          from: e.from === prevId ? newId : e.from,
-          to: e.to === prevId ? newId : e.to,
-        })),
-      );
-      setEdges((eds) =>
-        eds.map((e) => ({
-          ...e,
-          id: e.id.replace(prevId, newId),
-          source: e.source === prevId ? newId : e.source,
-          target: e.target === prevId ? newId : e.target,
-        })),
-      );
-      setSelectedStageId(newId);
-    }
-
-    setNodes((nds) =>
-      nds.map((n) =>
-        n.id === prevId
-          ? ({ ...n, id: newId, data: { ...n.data, stage: updated, onSelect: handleNodeSelect } as unknown as StageNodeData } as unknown as Node)
-          : n,
-      ),
-    );
-    if (idChanged) {
-      setPositions((prev) => {
-        const { [prevId]: pos, ...rest } = prev;
-        return { ...rest, [newId]: pos };
-      });
-    }
-  }, [setNodes, setEdges, handleNodeSelect]);
-
-  const handleStageDelete = useCallback((id: string) => {
-    setStages((prev) => prev.filter((s) => s.id !== id));
-    setEdgeDefs((prev) => prev.filter((e) => e.from !== id && e.to !== id));
-    setNodes((nds) => nds.filter((n) => n.id !== id));
-    setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
-    setSelectedStageId(null);
-  }, [setNodes, setEdges]);
-
-  const handleEdgeUpdate = useCallback(
-    (id: string, changes: Partial<{ label: string; sourceHandle: string; type: "default" | "error" | "loop"; activationKey: string; max_iterations: number }>) => {
-      setEdgeDefs((prev) =>
-        prev.map((e) =>
-          e.id === id ? { ...e, ...changes } : e,
-        ),
-      );
-      setEdges((eds) =>
-        eds.map((e) =>
-          e.id === id
-            ? {
-                ...e,
-                ...(changes.label !== undefined ? { label: changes.label } : {}),
-                ...(changes.sourceHandle !== undefined ? { sourceHandle: changes.sourceHandle, label: changes.sourceHandle } : {}),
-                ...(changes.type !== undefined
-                  ? { style: edgeStyleForType(changes.type) }
-                  : {}),
-                data: { ...(e.data ?? {}), ...changes },
-              }
-            : e,
-        ),
-      );
-    },
-    [setEdges],
-  );
-
-  const handleEdgeDelete = useCallback(
-    (id: string) => {
-      setEdgeDefs((prev) => prev.filter((e) => e.id !== id));
-      setEdges((eds) => eds.filter((e) => e.id !== id));
-      setSelectedEdgeId(null);
-    },
-    [setEdges],
-  );
-
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<ValidationWarning[]>([]);
 
   const handleSave = useCallback(async () => {
-    const errors = validatePipeline(name, stages, edgeDefs);
+    const { errors, warnings } = validatePipeline(name, stages, edgeDefs);
     if (errors.length > 0) {
       setValidationErrors(errors);
+      setValidationWarnings(warnings);
       return;
     }
     setValidationErrors([]);
+    setValidationWarnings(warnings);
     setSaving(true);
     setSaveError(null);
     try {
@@ -310,7 +178,9 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
         trigger: { label: triggerLabel },
         stages,
         edges: edgeDefs,
-        positions,
+        positions: Object.fromEntries(
+          rfNodes.map(n => [n.id, n.position]),
+        ),
       };
       await savePipeline({ name, content: JSON.stringify(updatedPipeline) });
       onSaved?.();
@@ -319,75 +189,25 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
     } finally {
       setSaving(false);
     }
-  }, [name, description, triggerLabel, stages, edgeDefs, positions, savePipeline, onSaved]);
+  }, [name, description, triggerLabel, stages, edgeDefs, rfNodes, savePipeline, onSaved]);
 
   const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
   const selectedRfEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#111827" }}>
-      {/* Toolbar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "10px 16px",
-          borderBottom: "1px solid #374151",
-          background: "#111827",
-          flexShrink: 0,
-          flexWrap: "wrap",
-        }}
-      >
-        <input
-          style={{
-            ...toolbarInputStyle,
-            fontWeight: 600,
-            fontSize: 14,
-            width: 180,
-          }}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Pipeline name"
-        />
-        <input
-          style={{ ...toolbarInputStyle, width: 260, color: "#9ca3af" }}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description"
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "#9ca3af", fontSize: 11 }}>Trigger label:</span>
-          <input
-            style={{ ...toolbarInputStyle, width: 140 }}
-            value={triggerLabel}
-            onChange={(e) => setTriggerLabel(e.target.value)}
-            placeholder="e.g. pipeline:feature"
-          />
-        </div>
-        <div style={{ flex: 1 }} />
-        <button
-          style={{ ...toolbarButtonStyle, background: "#1e3a5f", borderColor: "#2563eb" }}
-          onClick={handleAutoLayout}
-        >
-          Auto Layout
-        </button>
-        <button
-          style={{
-            ...toolbarButtonStyle,
-            background: saving ? "#1f2937" : "#1e3a5f",
-            borderColor: saving ? "#374151" : "#4f46e5",
-            opacity: saving ? 0.7 : 1,
-          }}
-          onClick={handleSave}
-          disabled={saving}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saveError && (
-          <span style={{ color: "#ef4444", fontSize: 11 }}>{saveError}</span>
-        )}
-      </div>
+      <PipelineToolbar
+        name={name}
+        description={description}
+        triggerLabel={triggerLabel}
+        saving={saving}
+        saveError={saveError}
+        onNameChange={setName}
+        onDescriptionChange={setDescription}
+        onTriggerLabelChange={setTriggerLabel}
+        onAutoLayout={handleAutoLayout}
+        onSave={handleSave}
+      />
 
       {/* Three-panel layout */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -403,12 +223,11 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
             nodes={nodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
             onEdgeClick={handleEdgeClick}
             onPaneClick={handlePaneClick}
-            onNodeDragStop={handleNodeDragStop}
             onSelectionChange={handleSelectionChange}
             fitView
             style={{ background: "#0f172a" }}
@@ -418,8 +237,9 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
           </ReactFlow>
           <ValidationErrorsPanel
             errors={validationErrors}
+            warnings={validationWarnings}
             onClickStage={(id) => { setSelectedStageId(id); setSelectedEdgeId(null); }}
-            onDismiss={() => setValidationErrors([])}
+            onDismiss={() => { setValidationErrors([]); setValidationWarnings([]); }}
           />
         </div>
 
@@ -427,33 +247,12 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
           selectedStage={selectedStage}
           selectedEdge={selectedRfEdge}
           currentPipelineName={name}
-          onStageChange={handleStageChange}
-          onStageDelete={handleStageDelete}
-          onEdgeUpdate={handleEdgeUpdate}
-          onEdgeDelete={handleEdgeDelete}
+          onStageChange={updateStage}
+          onStageDelete={removeStage}
+          onEdgeUpdate={updateEdge}
+          onEdgeDelete={removeEdge}
         />
       </div>
     </div>
   );
 }
-
-const toolbarInputStyle: React.CSSProperties = {
-  background: "#1f2937",
-  border: "1px solid #374151",
-  borderRadius: 6,
-  color: "#f9fafb",
-  fontSize: 12,
-  padding: "5px 8px",
-  outline: "none",
-};
-
-const toolbarButtonStyle: React.CSSProperties = {
-  background: "#1f2937",
-  border: "1px solid #374151",
-  borderRadius: 6,
-  color: "#f9fafb",
-  fontSize: 12,
-  fontWeight: 600,
-  padding: "5px 12px",
-  cursor: "pointer",
-};

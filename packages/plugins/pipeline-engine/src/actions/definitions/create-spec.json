@@ -1,0 +1,13 @@
+{
+  "id": "create-spec",
+  "name": "Create Spec",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Create a design spec for this feature issue using the **brainstorming** skill.\n\nFollow the brainstorming skill process exactly:\n1. Read the issue description and triage comments\n2. Read `governance/MISSION.md` and `governance/ENGINEERING.md` for alignment and standards\n3. Check existing specs in `docs/specs/` for prior art and conventions\n4. Assess scope — if multiple independent subsystems, decompose into sub-issues first\n5. Analyze requirements: purpose, constraints, success criteria, dependencies\n6. Explore 2-3 technical approaches with pros/cons\n7. Write the design spec to `docs/specs/` following the brainstorming skill template\n8. Self-review against mission alignment, spec quality, and engineering standards\n9. Commit and push the spec\n\nThe spec MUST include: Goal, Background, Approach (with alternatives considered), Requirements (Backend API, Frontend, Performance), API Contract, and Definition of Done.\n\nOutput 'done' when the spec is committed and pushed.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}

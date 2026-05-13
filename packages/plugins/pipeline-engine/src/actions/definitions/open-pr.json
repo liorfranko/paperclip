@@ -1,0 +1,13 @@
+{
+  "id": "open-pr",
+  "name": "Open PR",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Create a pull request for the implementation.\n\n1. Ensure branch is rebased on latest main with no conflicts\n2. Write a concise PR title (< 70 chars, imperative mood)\n3. PR body must include: summary of changes, test plan, and reference to the parent issue\n4. If this is a feature track, link the design spec path\n\nDo NOT merge — just open the PR and output 'done'.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}

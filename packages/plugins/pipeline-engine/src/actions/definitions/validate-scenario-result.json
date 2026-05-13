@@ -1,0 +1,13 @@
+{
+  "id": "validate-scenario-result",
+  "name": "Validate Scenario Result",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Run the holdout scenario against the implementation.\n\n1. Start the full application stack\n2. Execute each scenario step against the running app\n3. Evaluate satisfaction_criteria — each criterion scores 0 or 1\n4. Calculate overall score = passed_criteria / total_criteria\n\nOutput 'valid' if score >= 0.8, 'not-valid' if below.\n\nYou MUST actually run the app and interact with it. Self-scoring by reading code is prohibited. Take screenshots as evidence for each step.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["valid", "not-valid"] }
+    }
+  }
+}

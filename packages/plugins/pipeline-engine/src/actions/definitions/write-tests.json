@@ -1,0 +1,13 @@
+{
+  "id": "write-tests",
+  "name": "Write Tests",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Write tests BEFORE implementation (TDD).\n\n1. Read the spec and Definition of Done to understand expected behavior\n2. Write tests that cover: happy path, edge cases, error conditions\n3. Run the tests — they MUST fail (red phase). If they pass, you're testing existing behavior, not the new feature\n4. Commit the failing tests\n\nUse the project's test framework and conventions. Tests should be specific enough to catch regressions but not so brittle that refactoring breaks them.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}

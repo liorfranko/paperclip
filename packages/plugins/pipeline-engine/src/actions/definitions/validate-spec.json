@@ -1,0 +1,13 @@
+{
+  "id": "validate-spec",
+  "name": "Validate Spec",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Review the design spec referenced in the issue for implementation-readiness.\n\nA spec is ready ('yes') when it covers:\n- **Architecture**: which modules/files are affected and how they interact\n- **Data flow**: inputs, transformations, outputs, and persistence\n- **Error handling**: failure modes and recovery strategies\n- **Testing strategy**: what to test and at which layer\n- **Definition of Done**: checkable acceptance criteria\n\nOutput 'no' if any of these are missing or too vague to implement without guessing.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["yes", "no"] }
+    }
+  }
+}

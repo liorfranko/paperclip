@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { StageDefinition, StageStatus } from "../../types.js";
-import { getActionById } from "../../action-registry.js";
-import { getDecisionEnumValues, getArrayFieldValues } from "../../schema-utils.js";
+import { getActionById } from "../../actions/index.js";
+import { getDecisionEnumValues, getArrayFieldValues } from "../../actions/schema-utils.js";
 import { getStageColor, getStageBadge } from "../stage-type-meta.js";
 
 export interface StageNodeData {
