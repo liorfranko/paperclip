@@ -66,6 +66,19 @@ export class Router {
       let hasAnySatisfiedEdge = false;
 
       for (const edge of incomingEdges) {
+        // Loop edges represent re-entry paths from downstream stages.
+        // They should not block initial readiness — only non-loop edges matter for that.
+        if (edge.type === "loop") {
+          const sourceRow = stageStatusMap.get(edge.from);
+          if (sourceRow?.status === "completed") {
+            const edgeCount = counts[edge.id] ?? 0;
+            if (edgeCount < (edge.max_iterations ?? 0)) {
+              hasAnySatisfiedEdge = true;
+            }
+          }
+          continue;
+        }
+
         const sourceRow = stageStatusMap.get(edge.from);
         if (!sourceRow) {
           allSourcesResolved = false;
@@ -77,14 +90,6 @@ export class Router {
         if (!sourceCompleted) {
           allSourcesResolved = false;
           continue;
-        }
-
-        // Loop edge: check if iterations exhausted
-        if (edge.type === "loop") {
-          const edgeCount = counts[edge.id] ?? 0;
-          if (edgeCount >= (edge.max_iterations ?? 0)) {
-            continue;
-          }
         }
 
         // activationKey-based routing: edge satisfied only if key is in source's tracks array
