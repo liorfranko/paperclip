@@ -380,6 +380,15 @@ async function advancePipeline(
           continue;
         }
 
+        if (stageDef.type === "fan_in") {
+          const claimed = await stateMachine.claimStageForDispatch(stageRow.id);
+          if (!claimed) continue;
+          await stateMachine.updateStageStatus(stageRow.id, "completed");
+          ctx.logger.info("Fan-in sync point auto-completed", { runId, stageId: stageDef.id });
+          ctx.streams.emit("run-progress", { runId, stageId: stageDef.id, status: "completed" });
+          continue;
+        }
+
         if (!router.requiresAgentDispatch(stageDef)) {
           ctx.logger.warn("Stage type not dispatchable", { stageId: stageDef.id, type: stageDef.type });
           await stateMachine.updateStageStatus(stageRow.id, "failed");

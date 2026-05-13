@@ -158,8 +158,12 @@ export class Router {
       const incomingEdges = getIncomingEdges(stageDef.id, edges);
       if (incomingEdges.length === 0) continue;
 
-      // All sources must be resolved (completed or skipped) before we can declare skip
-      const allSourcesResolved = incomingEdges.every((edge) => {
+      // All non-loop sources must be resolved (completed or skipped) before we can declare skip.
+      // Loop edges are re-entry paths from downstream — they don't gate initial skip decisions.
+      const nonLoopEdges = incomingEdges.filter((e) => e.type !== "loop");
+      if (nonLoopEdges.length === 0) continue;
+
+      const allSourcesResolved = nonLoopEdges.every((edge) => {
         const sourceRow = stageStatusMap.get(edge.from);
         return sourceRow?.status === "completed" || sourceRow?.status === "skipped";
       });
@@ -168,19 +172,11 @@ export class Router {
       // Check if any edge is satisfied
       let anySatisfied = false;
 
-      for (const edge of incomingEdges) {
+      for (const edge of nonLoopEdges) {
         const sourceRow = stageStatusMap.get(edge.from);
         const sourceCompleted = sourceRow?.status === "completed";
 
         if (!sourceCompleted) continue;
-
-        // Loop edge: check iterations
-        if (edge.type === "loop") {
-          const edgeCount = counts[edge.id] ?? 0;
-          if (edgeCount >= (edge.max_iterations ?? 0)) {
-            continue;
-          }
-        }
 
         if (edge.activationKey) {
           const sourceOutput = sourceRow.output as Record<string, unknown> | null;
