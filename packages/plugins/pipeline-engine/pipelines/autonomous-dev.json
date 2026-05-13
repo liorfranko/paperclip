@@ -1,6 +1,7 @@
 {
   "name": "autonomous-dev",
-  "description": "Full autonomous development pipeline — triage → validate → plan → implement → review → validate → merge",
+  "version": 3,
+  "description": "Full autonomous development pipeline — triage → validate → plan → implement → review (7 specialized reviewers) → gate → simplify → validate → merge",
   "trigger": { "label": "pipeline:autonomous-dev" },
   "stages": [
     { "id": "triage", "type": "stage", "agent_role": "pipe-generic", "actionId": "triage-new-issues" },
@@ -21,11 +22,18 @@
     { "id": "sync-impl", "type": "fan_in" },
     { "id": "open-pr", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "open-pr" },
     { "id": "dispatch-reviews", "type": "fan_out", "actionId": "dispatch-code-reviews" },
-    { "id": "review-clean-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
-    { "id": "review-typed-code", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
-    { "id": "review-simplify", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "code-review" },
-    { "id": "critical-findings", "type": "fan_in" },
+
+    { "id": "review-code-quality", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-code-quality" },
+    { "id": "review-error-handling", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-error-handling" },
+    { "id": "review-test-coverage", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-test-coverage" },
+    { "id": "review-comments", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-comments" },
+    { "id": "review-type-design", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-type-design" },
+    { "id": "review-architecture", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-architecture" },
+    { "id": "review-blind-validation", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-blind-validation" },
+
+    { "id": "review-sync", "type": "fan_in" },
     { "id": "evaluate-findings", "type": "stage", "agent_role": "pipe-generic", "actionId": "evaluate-critical-findings" },
+    { "id": "simplify-code", "type": "stage", "agent_role": "pipe-backend", "actionId": "simplify-code" },
     { "id": "scenario-validator", "type": "stage", "agent_role": "pipe-validator", "actionId": "validate-scenario-result" },
     { "id": "escalate-validation", "type": "block", "reason": "Scenario validation failed after maximum retries. Manual intervention required — review implementation and holdout scenario." },
     { "id": "merge", "type": "stage", "agent_role": "pipe-pr-manager", "actionId": "merge-pr" }
@@ -57,19 +65,28 @@
     { "id": "e-sync-pr", "from": "sync-impl", "to": "open-pr" },
     { "id": "e-pr-reviews", "from": "open-pr", "to": "dispatch-reviews", "sourceHandle": "done" },
 
-    { "id": "e-reviews-clean", "from": "dispatch-reviews", "to": "review-clean-code", "activationKey": "clean-code" },
-    { "id": "e-reviews-typed", "from": "dispatch-reviews", "to": "review-typed-code", "activationKey": "typed-code" },
-    { "id": "e-reviews-simplify", "from": "dispatch-reviews", "to": "review-simplify", "activationKey": "simplify" },
+    { "id": "e-reviews-code-quality", "from": "dispatch-reviews", "to": "review-code-quality", "activationKey": "code-quality" },
+    { "id": "e-reviews-error-handling", "from": "dispatch-reviews", "to": "review-error-handling", "activationKey": "error-handling" },
+    { "id": "e-reviews-test-coverage", "from": "dispatch-reviews", "to": "review-test-coverage", "activationKey": "test-coverage" },
+    { "id": "e-reviews-comments", "from": "dispatch-reviews", "to": "review-comments", "activationKey": "comment-quality" },
+    { "id": "e-reviews-type-design", "from": "dispatch-reviews", "to": "review-type-design", "activationKey": "type-design" },
+    { "id": "e-reviews-architecture", "from": "dispatch-reviews", "to": "review-architecture", "activationKey": "architecture" },
+    { "id": "e-reviews-blind-validation", "from": "dispatch-reviews", "to": "review-blind-validation", "activationKey": "blind-validation" },
 
-    { "id": "e-clean-findings", "from": "review-clean-code", "to": "critical-findings", "sourceHandle": "done" },
-    { "id": "e-typed-findings", "from": "review-typed-code", "to": "critical-findings", "sourceHandle": "done" },
-    { "id": "e-simplify-findings", "from": "review-simplify", "to": "critical-findings", "sourceHandle": "done" },
+    { "id": "e-rq-sync", "from": "review-code-quality", "to": "review-sync" },
+    { "id": "e-reh-sync", "from": "review-error-handling", "to": "review-sync" },
+    { "id": "e-rtc-sync", "from": "review-test-coverage", "to": "review-sync" },
+    { "id": "e-rc-sync", "from": "review-comments", "to": "review-sync" },
+    { "id": "e-rtd-sync", "from": "review-type-design", "to": "review-sync" },
+    { "id": "e-ra-sync", "from": "review-architecture", "to": "review-sync" },
+    { "id": "e-rbv-sync", "from": "review-blind-validation", "to": "review-sync" },
 
-    { "id": "e-findings-evaluate", "from": "critical-findings", "to": "evaluate-findings" },
+    { "id": "e-sync-evaluate", "from": "review-sync", "to": "evaluate-findings" },
 
-    { "id": "e-findings-no", "from": "evaluate-findings", "to": "scenario-validator", "sourceHandle": "no-findings" },
-    { "id": "e-findings-backend", "from": "evaluate-findings", "to": "write-backend-tests", "sourceHandle": "yes-backend", "type": "loop", "max_iterations": 3 },
-    { "id": "e-findings-frontend", "from": "evaluate-findings", "to": "write-frontend-tests", "sourceHandle": "yes-frontend", "type": "loop", "max_iterations": 3 },
+    { "id": "e-findings-pass", "from": "evaluate-findings", "to": "simplify-code", "sourceHandle": "pass" },
+    { "id": "e-findings-fail-impl", "from": "evaluate-findings", "to": "write-backend-impl", "sourceHandle": "fail-impl", "type": "loop", "max_iterations": 3, "label": "revision loop (max 3)" },
+
+    { "id": "e-simplify-done", "from": "simplify-code", "to": "scenario-validator" },
 
     { "id": "e-validator-valid", "from": "scenario-validator", "to": "merge", "sourceHandle": "valid" },
     { "id": "e-validator-invalid", "from": "scenario-validator", "to": "escalate-validation", "sourceHandle": "not-valid" }
@@ -93,13 +110,18 @@
     "sync-impl": { "x": 400, "y": 980 },
     "open-pr": { "x": 400, "y": 1060 },
     "dispatch-reviews": { "x": 400, "y": 1140 },
-    "review-clean-code": { "x": 200, "y": 1180 },
-    "review-typed-code": { "x": 400, "y": 1180 },
-    "review-simplify": { "x": 600, "y": 1180 },
-    "critical-findings": { "x": 400, "y": 1300 },
-    "evaluate-findings": { "x": 400, "y": 1400 },
-    "scenario-validator": { "x": 400, "y": 1520 },
-    "escalate-validation": { "x": 650, "y": 1520 },
-    "merge": { "x": 400, "y": 1640 }
+    "review-code-quality": { "x": 50, "y": 1260 },
+    "review-error-handling": { "x": 170, "y": 1260 },
+    "review-test-coverage": { "x": 290, "y": 1260 },
+    "review-comments": { "x": 410, "y": 1260 },
+    "review-type-design": { "x": 530, "y": 1260 },
+    "review-architecture": { "x": 650, "y": 1260 },
+    "review-blind-validation": { "x": 770, "y": 1260 },
+    "review-sync": { "x": 400, "y": 1380 },
+    "evaluate-findings": { "x": 400, "y": 1480 },
+    "simplify-code": { "x": 400, "y": 1580 },
+    "scenario-validator": { "x": 400, "y": 1680 },
+    "escalate-validation": { "x": 650, "y": 1680 },
+    "merge": { "x": 400, "y": 1800 }
   }
 }
