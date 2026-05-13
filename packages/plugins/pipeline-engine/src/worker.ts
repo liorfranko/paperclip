@@ -80,7 +80,6 @@ async function seedBundledPipelines(ctx: PluginContext): Promise<void> {
   const pipelinesDir = resolve(workerDir, "..", "pipelines");
 
   for (const name of BUNDLED_PIPELINES) {
-    if (registry.includes(name)) continue;
     try {
       const content = readFileSync(resolve(pipelinesDir, `${name}.json`), "utf8");
       const pipeline = parsePipeline(content);
@@ -89,9 +88,24 @@ async function seedBundledPipelines(ctx: PluginContext): Promise<void> {
         ctx.logger.warn("Bundled pipeline invalid, skipping seed", { name, errors: validation.errors });
         continue;
       }
+
+      // Check if existing pipeline needs upgrade (version comparison)
+      if (registry.includes(name)) {
+        const existingJson = await ctx.state.get({ scopeKind: "instance", namespace: "pipeline", stateKey: `pipeline:${name}` });
+        const existing = safeParsePipelineJson(existingJson);
+        // parsePipeline strips version, so read from raw JSON content
+        const bundledParsed = JSON.parse(content);
+        const bundledVersion = bundledParsed.version ?? 0;
+        const existingVersion = (existing as any)?.version ?? 0;
+        if (existingVersion >= bundledVersion) continue;
+        ctx.logger.info("Upgrading bundled pipeline", { name, from: existingVersion, to: bundledVersion });
+      }
+
       await ctx.state.set({ scopeKind: "instance", namespace: "pipeline", stateKey: `pipeline:${name}` }, content);
-      await ctx.state.set(PIPELINE_REGISTRY_KEY, [...registry, name]);
-      registry.push(name);
+      if (!registry.includes(name)) {
+        await ctx.state.set(PIPELINE_REGISTRY_KEY, [...registry, name]);
+        registry.push(name);
+      }
       ctx.logger.info("Seeded bundled pipeline", { name });
     } catch (err) {
       ctx.logger.warn("Failed to seed bundled pipeline", { name, error: String(err) });

@@ -119,19 +119,24 @@ export const ACTIONS: readonly Action[] = [
     type: "single-decision",
     instructions:
       "Read all code review findings from upstream review stages.\n\n" +
-      "A finding is **critical** (blocking) if it involves:\n" +
-      "- Security vulnerabilities (injection, auth bypass, data exposure)\n" +
-      "- Data loss or corruption risks\n" +
-      "- Correctness bugs that would break user-facing behavior\n\n" +
-      "Non-critical findings (style, naming, minor refactoring) do NOT block.\n\n" +
+      "Each reviewer outputs a structured `findings` array with severity enum: critical, major, minor.\n\n" +
+      "A finding is **blocking** (must fix before merge) if:\n" +
+      "- severity is 'critical'\n" +
+      "- Multiple reviewers agree on the same issue (convergence signal)\n" +
+      "- Any reviewer decision is 'needs_revision'\n\n" +
+      "Non-blocking findings (minor, stylistic, suggestions) do NOT block.\n\n" +
+      "DEDUPLICATION: If multiple reviewers flag the same file+line, that's one finding, not many. Count unique issues.\n\n" +
       "Output:\n" +
-      "- 'no-findings' — no critical issues, safe to proceed\n" +
-      "- 'yes-backend' — critical findings in backend code need fixing\n" +
-      "- 'yes-frontend' — critical findings in frontend code need fixing",
+      "- 'pass' — no blocking issues, safe to proceed to simplification\n" +
+      "- 'fail-impl' — blocking findings require re-implementation (loop back to coding stage)\n\n" +
+      "When outputting 'fail-impl', include a `revision_brief` field with a concise summary of what needs fixing (this gets passed back to the implementation agent).",
     outputSchema: {
       type: "object",
       properties: {
-        decision: { enum: ["no-findings", "yes-backend", "yes-frontend"] },
+        decision: { enum: ["pass", "fail-impl"] },
+        total_findings: { type: "integer" },
+        blocking_count: { type: "integer" },
+        revision_brief: { type: "string" },
       },
     },
   },
@@ -164,7 +169,10 @@ export const ACTIONS: readonly Action[] = [
     outputSchema: {
       type: "object",
       properties: {
-        tracks: { type: "array", items: { enum: ["clean-code", "typed-code", "simplify"] } },
+        tracks: { type: "array", items: { enum: [
+          "code-quality", "error-handling", "test-coverage",
+          "comment-quality", "type-design", "architecture", "blind-validation"
+        ] } },
       },
     },
   },
@@ -243,22 +251,294 @@ export const ACTIONS: readonly Action[] = [
     },
   },
   {
-    id: "code-review",
-    name: "Code Review",
+    id: "review-code-quality",
+    name: "Review: Code Quality",
     type: "single-decision",
     instructions:
-      "Review the PR diff for your assigned dimension.\n\n" +
-      "Dimensions:\n" +
-      "- **clean-code**: naming, structure, readability, no shallow wrappers or 'utils' files\n" +
-      "- **typed-code**: type safety, no unsafe casts, no `any` without justification, no `# type: ignore` without explanation\n" +
-      "- **simplify**: unnecessary complexity, dead code, over-abstraction, premature generalization\n\n" +
-      "Report findings as: `{severity, file, line, message}`\n" +
-      "Severities: critical (blocks merge), high (should fix), medium (consider), low (nitpick)\n\n" +
-      "Only report findings you're confident about. Do NOT nitpick style that matches repo conventions.",
+      "You are the Code Quality Reviewer. Review the PR diff for real bugs, real security risks, and real guideline violations.\n\n" +
+      "Focus:\n" +
+      "- Logic correctness — actual bugs that would break behavior\n" +
+      "- Security vulnerabilities — injection, auth bypass, data exposure\n" +
+      "- Guideline violations — patterns that conflict with project standards\n\n" +
+      "Do NOT report:\n" +
+      "- Style preferences or theoretical concerns\n" +
+      "- Findings you aren't confident about (false positives erode trust)\n" +
+      "- Anything another reviewer dimension covers (error handling, types, architecture)\n\n" +
+      "Report each finding as structured JSON in the output `findings` array.\n" +
+      "A clean review is a good outcome, not a failure to find issues.\n\n" +
+      "Output `approved` if no critical/major issues. `needs_revision` if critical findings exist.",
     outputSchema: {
       type: "object",
       properties: {
-        decision: { enum: ["done"] },
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-error-handling",
+    name: "Review: Error Handling (Silent Failure Hunter)",
+    type: "single-decision",
+    instructions:
+      "You are the Silent Failure Hunter. You believe silent failures are the worst kind of bug — they hide problems until they become crises.\n\n" +
+      "Focus:\n" +
+      "- Swallowed errors (empty catch blocks, ignored Promise rejections)\n" +
+      "- Missing error propagation (errors that should bubble up but don't)\n" +
+      "- Incomplete error handling (try/catch that hides the real failure mode)\n" +
+      "- Error messages that don't help debugging\n" +
+      "- Missing error boundaries in UI code\n\n" +
+      "For EVERY finding, you MUST include the user impact — an error handling issue without a clear user impact statement is not a useful finding.\n\n" +
+      "Acceptable patterns you should NOT flag:\n" +
+      "- Optional UI enhancements gracefully degrading\n" +
+      "- Best-effort logging that doesn't affect core flow\n\n" +
+      "Output `approved` if no critical/major issues. `needs_revision` if critical findings exist.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              user_impact: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-test-coverage",
+    name: "Review: Test Coverage (PR Test Analyzer)",
+    type: "single-decision",
+    instructions:
+      "You are the PR Test Analyzer. You care about behavioral coverage, not line coverage metrics.\n\n" +
+      "Focus:\n" +
+      "- Does this PR have tests that verify the NEW behavior it introduces?\n" +
+      "- Are edge cases and error conditions tested?\n" +
+      "- Were any pre-existing test files modified? (CRITICAL — Clean Room violation)\n" +
+      "- Do the tests verify behavior or just implementation details?\n" +
+      "- Are there tests that would catch real regressions (data loss, security, user-facing errors)?\n\n" +
+      "CRITICAL: If the implementing agent modified pre-written test files, that is ALWAYS a critical finding. The integrity of pre-written tests is sacred.\n\n" +
+      "Do NOT demand:\n" +
+      "- 100% coverage\n" +
+      "- Pedantic edge case tests that add maintenance burden without catching real failures\n\n" +
+      "Output `approved` if tests adequately cover new behavior. `needs_revision` if critical gaps exist.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-comments",
+    name: "Review: Comment Quality",
+    type: "single-decision",
+    instructions:
+      "You are the Comment Analyzer. Inaccurate comments are worse than no comments — they actively mislead future developers.\n\n" +
+      "Focus:\n" +
+      "- Comments that explain 'what' (the code already says this — remove them)\n" +
+      "- Comments that are factually wrong or stale\n" +
+      "- Missing 'why' comments where non-obvious constraints or workarounds exist\n" +
+      "- TODO/FIXME/HACK comments that indicate unfinished work being merged\n\n" +
+      "Good comments explain WHY, not WHAT. The best code needs few comments.\n\n" +
+      "If there are no comments to analyze, say so and approve. Not every PR needs comment feedback.\n\n" +
+      "Output `approved` if comments are accurate and appropriate. `needs_revision` only for critical misleading comments.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-type-design",
+    name: "Review: Type Design",
+    type: "single-decision",
+    instructions:
+      "You are the Type Design Analyzer. You believe in making illegal states unrepresentable.\n\n" +
+      "Focus:\n" +
+      "- Type holes: `any`, `unknown` without narrowing, unsafe casts\n" +
+      "- Missing discriminated unions where state variants exist\n" +
+      "- Overly permissive types (string where a literal union would be safer)\n" +
+      "- Incomplete or incorrect generic constraints\n" +
+      "- `# type: ignore` / `@ts-ignore` without explanation\n\n" +
+      "Be practical:\n" +
+      "- Consider the maintenance burden of stronger invariants\n" +
+      "- Perfect type safety at the cost of unreadable code is not a win\n" +
+      "- If no new types are introduced, approve and move on\n\n" +
+      "Output `approved` if type design is sound. `needs_revision` if type holes allow invalid states.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-architecture",
+    name: "Review: Architecture",
+    type: "single-decision",
+    instructions:
+      "You are the Architecture Reviewer. You protect the structural health of the codebase against entropy.\n\n" +
+      "Focus:\n" +
+      "- Module depth — modules should get deeper (more logic behind same interface), not shallower\n" +
+      "- Module boundaries — imports must go through public interfaces, not reach into internals\n" +
+      "- Code placement — new code goes in existing modules first; new modules require justification\n" +
+      "- Naming alignment — identifiers should match project glossary, no synonym drift\n" +
+      "- Entropy prevention — no `utils` files, no premature splitting, no shallow proliferation\n\n" +
+      "Reference `docs/ARCHITECTURE.md` (or equivalent) for code placement decisions.\n\n" +
+      "Block sparingly, warn often. Only report CRITICAL for clear anti-patterns (new utils file, internal imports from outside module, file proliferation).\n\n" +
+      "Output `approved` if structure is maintained. `needs_revision` for structural violations.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "review-blind-validation",
+    name: "Review: Blind Validation",
+    type: "single-decision",
+    instructions:
+      "You are the Blind Validator. You review the PR diff WITHOUT reading the spec or issue description. Your lack of context is your superpower.\n\n" +
+      "Philosophy:\n" +
+      "- You have NO knowledge of what was requested. That's the point.\n" +
+      "- Code that needs a spec to understand is code that will confuse the next developer.\n" +
+      "- A finding you're unsure about is a question, not a bug. Report it honestly.\n" +
+      "- Evidence over claims. If you can't prove it's wrong, don't call it wrong.\n\n" +
+      "Focus:\n" +
+      "- Logic correctness (does this code do what it appears to intend?)\n" +
+      "- Security issues visible from code alone\n" +
+      "- Edge cases and boundary conditions\n" +
+      "- Wiring issues (wrong function called, wrong parameter order, off-by-one)\n" +
+      "- Self-documentation (can you understand the code without context?)\n\n" +
+      "IGNORE the issue description / spec sections in context. Only look at the diff.\n" +
+      "Only report findings with confidence >= 80%.\n\n" +
+      "Output `approved` if code is self-explanatory and correct. `needs_revision` for logic bugs.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["approved", "needs_revision"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { enum: ["critical", "major", "minor"] },
+              file: { type: "string" },
+              line: { type: "integer" },
+              description: { type: "string" },
+              confidence: { type: "number" },
+              suggestion: { type: "string" },
+            },
+          },
+        },
+        summary: { type: "string" },
+      },
+    },
+  },
+  {
+    id: "simplify-code",
+    name: "Simplify Code",
+    type: "single-decision",
+    instructions:
+      "You are the Code Simplifier. Clarity is the highest virtue. You run as the final polish pass AFTER all reviews pass.\n\n" +
+      "Simplify:\n" +
+      "- Reduce unnecessary nesting (early returns, guard clauses)\n" +
+      "- Eliminate redundant code and abstractions\n" +
+      "- Improve variable and function names for clarity\n" +
+      "- Remove obvious/redundant comments that describe what the code already says\n" +
+      "- Three readable lines are better than one clever line\n\n" +
+      "Rules:\n" +
+      "- NEVER change behavior or functionality\n" +
+      "- NEVER touch test files\n" +
+      "- NEVER refactor code outside the PR diff\n" +
+      "- Choose clarity over brevity (no nested ternaries)\n\n" +
+      "After changes, run the full test suite + lint + typecheck. If anything breaks, revert ALL changes and report as-is.\n\n" +
+      "Output 'done' when simplification is committed, or 'no-changes' if the code is already clean.",
+    outputSchema: {
+      type: "object",
+      properties: {
+        decision: { enum: ["done", "no-changes"] },
       },
     },
   },
