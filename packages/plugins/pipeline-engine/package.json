@@ -23,9 +23,7 @@
     "@paperclipai/plugin-sdk": "workspace:*",
     "@xyflow/react": "^12.4.0",
     "ajv": "^8.17.0",
-    "dagre": "^0.8.5",
-    "handlebars": "^4.7.8",
-    "jsonata": "^2.0.5"
+    "dagre": "^0.8.5"
   },
   "devDependencies": {
     "@paperclipai/shared": "workspace:*",
