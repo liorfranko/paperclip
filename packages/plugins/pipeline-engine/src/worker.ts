@@ -526,6 +526,8 @@ async function handleCommentEvent(ctx: PluginContext, event: PluginEvent): Promi
   await stateMachine.updateStageStatus(stageRow.id, "completed");
   ctx.streams.emit("run-progress", { runId: run.id, stageId: stageRow.stageId, status: "completed" });
 
+  await ctx.issues.update(issueId, { status: "done" }, event.companyId);
+
   ctx.logger.info("Stage completed", { stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId });
 
   if (isBlockingDecision(output)) {
