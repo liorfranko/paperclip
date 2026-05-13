@@ -282,6 +282,12 @@ async function advancePipeline(
 ): Promise<void> {
   const MAX_ITERATIONS = 50;
 
+  const parentIssueForProject = await ctx.issues.get(
+    (await stateMachine.getRun(runId))?.parentIssueId ?? "",
+    companyId,
+  );
+  const projectId = parentIssueForProject?.projectId ?? undefined;
+
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
     const run = await stateMachine.getRun(runId);
     if (!run || run.status !== "running") return;
@@ -402,6 +408,7 @@ async function advancePipeline(
             stage: stageDef,
             companyId,
             parentIssueId: run.parentIssueId,
+            projectId,
             context,
           });
           await stateMachine.setStageSubIssueId(stageRow.id, result.issueId);
@@ -612,6 +619,8 @@ async function handleStageFailure(
   const run = await stateMachine.getRun(runId);
   if (!run) return;
 
+  const parentIssue = await ctx.issues.get(run.parentIssueId, companyId);
+
   const claimed = await stateMachine.claimStageForDispatch(gotoTargetRow.id);
   if (!claimed) return;
 
@@ -623,6 +632,7 @@ async function handleStageFailure(
       stage: targetDef,
       companyId,
       parentIssueId: run.parentIssueId,
+      projectId: parentIssue?.projectId ?? undefined,
       context: failureAction.body,
     });
     await stateMachine.setStageSubIssueId(gotoTargetRow.id, result.issueId);

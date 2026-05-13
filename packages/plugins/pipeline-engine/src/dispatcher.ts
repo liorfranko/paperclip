@@ -33,7 +33,7 @@ export class Dispatcher {
   ) {}
 
   async dispatch(request: DispatchRequest): Promise<DispatchResult> {
-    const { pipelineRunId, stage, companyId, parentIssueId, context } = request;
+    const { pipelineRunId, stage, companyId, parentIssueId, projectId, context } = request;
 
     const agentRole = "agent_role" in stage ? stage.agent_role : undefined;
 
@@ -51,6 +51,7 @@ export class Dispatcher {
       companyId,
       parentId: parentIssueId,
       inheritExecutionWorkspaceFromIssueId: parentIssueId,
+      projectId,
       title: `[pipeline] ${stage.id}`,
       description,
       status: "todo",

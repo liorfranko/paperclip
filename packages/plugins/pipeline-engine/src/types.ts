@@ -97,6 +97,7 @@ export interface DispatchRequest {
   stage: StageDefinition;
   companyId: string;
   parentIssueId: string;
+  projectId?: string;
   context?: string;
 }
 
@@ -119,6 +120,7 @@ export interface CreateIssueInput {
   billingCode?: string;
   originKind?: string;
   originId?: string;
+  projectId?: string;
   inheritExecutionWorkspaceFromIssueId?: string;
 }
 
