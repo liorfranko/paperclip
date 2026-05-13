@@ -45,7 +45,7 @@ export function getLoopBodyStageIds(
   return result;
 }
 
-export function canReach(from: string, to: string, adjacency: Map<string, string[]>): boolean {
+function canReach(from: string, to: string, adjacency: Map<string, string[]>): boolean {
   const visited = new Set<string>();
   const queue = [from];
   while (queue.length > 0) {

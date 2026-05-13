@@ -69,7 +69,6 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
     stages, edgeDefs, rfNodes, rfEdges,
     selectedStageId, selectedEdgeId,
     setSelectedStageId, setSelectedEdgeId,
-    handleNodeSelect,
     addStage, removeStage, updateStage,
     addEdge, removeEdge, updateEdge,
     moveNode, setAllPositions,

@@ -93,15 +93,6 @@ export function usePipelineState(initial: PipelineDefinition) {
     setPositions(prev => ({ ...prev, ...newPositions }));
   }, []);
 
-  const toDefinition = useCallback((name: string, description: string, trigger: { label: string }): PipelineDefinition => ({
-    name,
-    description,
-    trigger,
-    stages,
-    edges: edgeDefs,
-    positions,
-  }), [stages, edgeDefs, positions]);
-
   return {
     stages, edgeDefs, positions,
     rfNodes, rfEdges,
@@ -111,6 +102,5 @@ export function usePipelineState(initial: PipelineDefinition) {
     addStage, removeStage, updateStage,
     addEdge, removeEdge, updateEdge,
     moveNode, setAllPositions,
-    toDefinition,
   };
 }

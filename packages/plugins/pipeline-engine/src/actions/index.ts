@@ -78,10 +78,6 @@ export function getActionById(id: string): Action | undefined {
   return ACTIONS.find((a) => a.id === id);
 }
 
-export function getAllActions(): readonly Action[] {
-  return ACTIONS;
-}
-
 export function getActionsForType(type: ActionType): Action[] {
   return ACTIONS.filter((a) => a.type === type);
 }

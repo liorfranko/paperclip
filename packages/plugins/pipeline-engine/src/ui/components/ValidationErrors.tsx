@@ -14,7 +14,7 @@ export interface ValidationWarning {
   message: string;
 }
 
-export interface ValidationOutput {
+interface ValidationOutput {
   errors: ValidationError[];
   warnings: ValidationWarning[];
 }
