@@ -125,7 +125,6 @@ export async function handleCommentEvent(
 
   await ctx.issues.update(issueId, { status: "done" }, event.companyId);
 
-  ctx.logger.info("Stage completed", { stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId });
 
   if (isBlockingDecision(output)) {
     ctx.logger.warn("Stage output contains blocking decision — escalating to human", {

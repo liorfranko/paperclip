@@ -213,42 +213,24 @@ describe("state-machine", () => {
     });
   });
 
-  describe("advisory lock with PostgreSQL", () => {
-    it("uses pg_try_advisory_lock when supported", async () => {
-      // Simulate pg support by making init() succeed
-      db.query.mockResolvedValue([{ locked: true }]);
+  describe("advisory lock uses in-process mechanism", () => {
+    it("never issues pg_try_advisory_lock queries", async () => {
       await sm.init();
+      const callCountBefore = db.query.mock.calls.length;
 
-      db.query.mockResolvedValueOnce([{ locked: true }]);
       const acquired = await sm.tryAdvisoryLock("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
       expect(acquired).toBe(true);
-      const sql = db.query.mock.calls[db.query.mock.calls.length - 1][0] as string;
-      expect(sql).toContain("pg_try_advisory_lock");
-    });
-
-    it("uses pg_advisory_unlock on release when supported", async () => {
-      db.query.mockResolvedValue([{ locked: true }]);
-      await sm.init();
-
-      db.query.mockResolvedValueOnce([]);
-      await sm.releaseAdvisoryLock("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-      const sql = db.query.mock.calls[db.query.mock.calls.length - 1][0] as string;
-      expect(sql).toContain("pg_advisory_unlock");
-    });
-
-    it("falls back to in-process lock when advisory lock query throws", async () => {
-      // Simulate PGlite / unsupported — init() query throws
-      db.query.mockRejectedValueOnce(new Error("pg_try_advisory_lock not supported"));
-      await sm.init();
-
-      // Should use in-process fallback (no db calls for lock)
-      const callCountBefore = db.query.mock.calls.length;
-      const acquired = await sm.tryAdvisoryLock("run-fallback");
-      expect(acquired).toBe(true);
-      // No additional db.query calls should have been made
       expect(db.query.mock.calls.length).toBe(callCountBefore);
 
-      // Second acquire should fail (held in-process)
+      await sm.releaseAdvisoryLock("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+      expect(db.query.mock.calls.length).toBe(callCountBefore);
+    });
+
+    it("blocks concurrent lock on same runId", async () => {
+      await sm.init();
+      const acquired = await sm.tryAdvisoryLock("run-fallback");
+      expect(acquired).toBe(true);
+
       const second = await sm.tryAdvisoryLock("run-fallback");
       expect(second).toBe(false);
     });

@@ -8,21 +8,12 @@ interface DbClient {
 
 export class StateMachine {
   private db: DbClient;
-  private supportsAdvisoryLocks = false;
 
   constructor(db: DbClient) {
     this.db = db;
   }
 
-  async init(): Promise<void> {
-    try {
-      await this.db.query(`SELECT pg_try_advisory_lock(0)`);
-      await this.db.query(`SELECT pg_advisory_unlock(0)`);
-      this.supportsAdvisoryLocks = true;
-    } catch {
-      this.supportsAdvisoryLocks = false;
-    }
-  }
+  async init(): Promise<void> {}
 
   private table(name: string): string {
     return `${this.db.namespace}.${name}`;
@@ -32,28 +23,11 @@ export class StateMachine {
   private static LOCK_TTL_MS = 60_000;
 
   async tryAdvisoryLock(runId: string): Promise<boolean> {
-    if (!this.supportsAdvisoryLocks) {
-      return this.tryInProcessLock(runId);
-    }
-    const lockKey = this.runIdToLockKey(runId);
-    const [row] = await this.db.query<{ locked: boolean }>(
-      `SELECT pg_try_advisory_lock($1) as locked`,
-      [lockKey],
-    );
-    return row?.locked ?? false;
+    return this.tryInProcessLock(runId);
   }
 
   async releaseAdvisoryLock(runId: string): Promise<void> {
-    if (!this.supportsAdvisoryLocks) {
-      this.releaseInProcessLock(runId);
-      return;
-    }
-    const lockKey = this.runIdToLockKey(runId);
-    await this.db.query(`SELECT pg_advisory_unlock($1)`, [lockKey]);
-  }
-
-  private runIdToLockKey(runId: string): string {
-    return BigInt("0x" + runId.replace(/-/g, "").slice(0, 15)).toString();
+    this.releaseInProcessLock(runId);
   }
 
   private tryInProcessLock(runId: string): boolean {
