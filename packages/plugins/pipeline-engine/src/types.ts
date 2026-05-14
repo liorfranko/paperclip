@@ -13,12 +13,14 @@ export interface Stage extends BaseStage {
   type: "stage";
   agent_role: string;
   actionId: string;
+  context_includes?: string[];
 }
 
 export interface FanOutStage extends BaseStage {
   type: "fan_out";
   agent_role?: string;
   actionId: string;
+  context_includes?: string[];
 }
 
 export interface FanInStage extends BaseStage {

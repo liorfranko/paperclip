@@ -35,6 +35,21 @@ export async function buildStageContext(
     }
   }
 
+  const contextIncludes = "context_includes" in stageDef ? (stageDef as { context_includes?: string[] }).context_includes : undefined;
+  if (contextIncludes && contextIncludes.length > 0) {
+    const additionalOutputs: string[] = [];
+    for (const includeId of contextIncludes) {
+      if (incomingEdgeSourceIds.includes(includeId)) continue; // already included above
+      const includeRow = stageRows.find((s) => s.stageId === includeId);
+      if (includeRow?.output) {
+        additionalOutputs.push(`### ${includeId} output\n\n\`\`\`json\n${JSON.stringify(includeRow.output, null, 2)}\n\`\`\``);
+      }
+    }
+    if (additionalOutputs.length > 0) {
+      sections.push(`## Additional Context (from prior stages)\n\n${additionalOutputs.join("\n\n")}`);
+    }
+  }
+
   const actionId = "actionId" in stageDef ? stageDef.actionId : undefined;
   const action = actionId ? getActionById(actionId) : undefined;
   if (action?.instructions) {

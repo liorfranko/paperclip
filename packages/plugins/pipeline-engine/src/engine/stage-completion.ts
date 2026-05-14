@@ -89,6 +89,13 @@ export async function handleCommentEvent(
 
   const output = extraction.data!;
 
+  if (stageRow.status === "completed") {
+    ctx.logger.debug("Ignoring duplicate completion for already-completed stage", {
+      stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId,
+    });
+    return;
+  }
+
   const run = await stateMachine.getRun(stageRow.pipelineRunId);
   if (!run) {
     ctx.logger.error("Pipeline run not found for stage with valid output — output discarded", {
