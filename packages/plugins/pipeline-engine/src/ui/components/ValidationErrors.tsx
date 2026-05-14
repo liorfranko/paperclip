@@ -1,4 +1,4 @@
-import { getActionById } from "../../action-registry.js";
+import { getActionById } from "../../actions/index.js";
 import type { StageDefinition, EdgeDefinition } from "../../types.js";
 
 export interface ValidationError {
@@ -8,12 +8,24 @@ export interface ValidationError {
   message: string;
 }
 
+export interface ValidationWarning {
+  stageId?: string;
+  field: string;
+  message: string;
+}
+
+interface ValidationOutput {
+  errors: ValidationError[];
+  warnings: ValidationWarning[];
+}
+
 export function validatePipeline(
   name: string,
   stages: StageDefinition[],
   edges: EdgeDefinition[],
-): ValidationError[] {
+): ValidationOutput {
   const errors: ValidationError[] = [];
+  const warnings: ValidationWarning[] = [];
 
   if (!name.trim()) {
     errors.push({ field: "name", message: "Pipeline name is required" });
@@ -64,35 +76,66 @@ export function validatePipeline(
     }
   }
 
-  return errors;
+  // Warnings for sub-pipeline stages (valid but not yet supported at runtime)
+  for (const stage of stages) {
+    if (stage.type === "sub-pipeline") {
+      warnings.push({
+        stageId: stage.id,
+        field: "type",
+        message: `"${stage.id}" uses sub-pipeline type which is not yet supported — it will fail during execution`,
+      });
+    }
+  }
+
+  return { errors, warnings };
 }
 
 interface ValidationErrorsPanelProps {
   errors: ValidationError[];
+  warnings?: ValidationWarning[];
   onClickStage: (id: string) => void;
   onDismiss: () => void;
 }
 
-export function ValidationErrorsPanel({ errors, onClickStage, onDismiss }: ValidationErrorsPanelProps) {
-  if (errors.length === 0) return null;
+export function ValidationErrorsPanel({ errors, warnings = [], onClickStage, onDismiss }: ValidationErrorsPanelProps) {
+  if (errors.length === 0 && warnings.length === 0) return null;
+
+  const borderColor = errors.length > 0 ? "#991b1b" : "#92400e";
 
   return (
-    <div style={panelStyle}>
+    <div style={{ ...panelStyle, borderColor }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ color: "#fca5a5", fontSize: 12, fontWeight: 700 }}>
-          {errors.length} validation error{errors.length > 1 ? "s" : ""}
-        </span>
+        {errors.length > 0 && (
+          <span style={{ color: "#fca5a5", fontSize: 12, fontWeight: 700 }}>
+            {errors.length} validation error{errors.length > 1 ? "s" : ""}
+          </span>
+        )}
+        {warnings.length > 0 && (
+          <span style={{ color: "#fcd34d", fontSize: 12, fontWeight: 700, marginLeft: errors.length > 0 ? 12 : 0 }}>
+            {warnings.length} warning{warnings.length > 1 ? "s" : ""}
+          </span>
+        )}
         <button style={dismissStyle} onClick={onDismiss}>✕</button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 120, overflowY: "auto" }}>
         {errors.map((err, i) => (
           <div
-            key={i}
+            key={`err-${i}`}
             style={errorRowStyle}
             onClick={() => err.stageId && onClickStage(err.stageId)}
           >
             <span style={{ color: "#ef4444", fontSize: 11 }}>●</span>
             <span style={{ color: "#e5e7eb", fontSize: 11 }}>{err.message}</span>
+          </div>
+        ))}
+        {warnings.map((warn, i) => (
+          <div
+            key={`warn-${i}`}
+            style={errorRowStyle}
+            onClick={() => warn.stageId && onClickStage(warn.stageId)}
+          >
+            <span style={{ color: "#f59e0b", fontSize: 11 }}>●</span>
+            <span style={{ color: "#e5e7eb", fontSize: 11 }}>{warn.message}</span>
           </div>
         ))}
       </div>

@@ -1,0 +1,15 @@
+{
+  "id": "review-comments",
+  "name": "Review: Comment Quality",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "You are the Comment Analyzer. Inaccurate comments are worse than no comments — they actively mislead future developers.\n\nFocus:\n- Comments that explain 'what' (the code already says this — remove them)\n- Comments that are factually wrong or stale\n- Missing 'why' comments where non-obvious constraints or workarounds exist\n- TODO/FIXME/HACK comments that indicate unfinished work being merged\n\nGood comments explain WHY, not WHAT. The best code needs few comments.\n\nIf there are no comments to analyze, say so and approve. Not every PR needs comment feedback.\n\nOutput `approved` if comments are accurate and appropriate. `needs_revision` only for critical misleading comments.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["approved", "needs_revision"] },
+      "$findings": true,
+      "summary": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "evaluate-critical-findings",
+  "name": "Evaluate Critical Findings",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Read all code review findings from upstream review stages.\n\nEach reviewer outputs a structured `findings` array with severity enum: critical, major, minor.\n\nA finding is **blocking** (must fix before merge) if:\n- severity is 'critical'\n- Multiple reviewers agree on the same issue (convergence signal)\n- Any reviewer decision is 'needs_revision'\n\nNon-blocking findings (minor, stylistic, suggestions) do NOT block.\n\nDEDUPLICATION: If multiple reviewers flag the same file+line, that's one finding, not many. Count unique issues.\n\nOutput:\n- 'pass' — no blocking issues, safe to proceed to simplification\n- 'fail-impl' — blocking findings require re-implementation (loop back to coding stage)\n\nWhen outputting 'fail-impl', include a `revision_brief` field with a concise summary of what needs fixing (this gets passed back to the implementation agent).",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["pass", "fail-impl"] },
+      "total_findings": { "type": "integer" },
+      "blocking_count": { "type": "integer" },
+      "revision_brief": { "type": "string" }
+    }
+  }
+}

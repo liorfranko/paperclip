@@ -8,7 +8,6 @@ const watch = process.argv.includes("--watch");
 const workerCtx = await esbuild.context(presets.esbuild.worker);
 const manifestCtx = await esbuild.context(presets.esbuild.manifest);
 
-cpSync("schemas", "dist/schemas", { recursive: true });
 cpSync("pipelines", "dist/pipelines", { recursive: true });
 
 if (watch) {

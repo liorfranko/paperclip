@@ -65,6 +65,24 @@ POST /api/issues/{PAPERCLIP_TASK_ID}/comments
 
 The JSON must conform to the schema provided in your issue description's "Required Schema" section. The engine injects the full JSON Schema into every task issue — read it there. Do not rely on memorized schemas.
 
+## Uploading Attachments (Screenshots, Files)
+
+When your task requires evidence (screenshots, generated files, etc.), upload them as attachments to your issue:
+
+```bash
+curl -X POST "${PAPERCLIP_API_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${PAPERCLIP_TASK_ID}/attachments" \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+  -H "X-Paperclip-Run-Id: ${PAPERCLIP_RUN_ID}" \
+  -F "file=@/path/to/screenshot.png"
+```
+
+For screenshots taken during validation:
+1. Use your browser/screenshot tool to capture the image to a local file
+2. Upload it immediately via the endpoint above
+3. Reference the attachment in your structured output or comment
+
+The UI will display uploaded images inline. Do NOT just describe what you see in text — actually capture and upload the file.
+
 ## Handling Failures
 
 If you cannot complete your task:

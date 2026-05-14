@@ -1,0 +1,13 @@
+{
+  "id": "triage-new-issues",
+  "name": "Triage New Issues",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Classify this issue into exactly one track:\n- **feature**: new user-facing capability requiring spec, tests, implementation, review, and validation\n- **bug**: broken existing behavior with a clear reproduction path\n- **fast-track**: trivial change (typo, config tweak, dependency bump) that needs no spec or review\n\nRead the issue title, description, and labels. If unclear, default to 'feature' — it's safer to over-process than to skip gates.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["feature", "bug", "fast-track"] }
+    }
+  }
+}

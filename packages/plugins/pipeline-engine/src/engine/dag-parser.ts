@@ -1,0 +1,139 @@
+import type { EdgeDefinition, PipelineDefinition, StageDefinition } from "../types.js";
+import { buildAdjacencyFromEdges, getLoopEdges } from "./edge-utils.js";
+import { getActionById } from "../actions/index.js";
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function parsePipeline(content: string): PipelineDefinition {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`Invalid JSON: ${(err as Error).message}`);
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid pipeline: expected an object");
+  }
+  if (!parsed.name || typeof parsed.name !== "string") {
+    throw new Error("Pipeline must have a 'name' field");
+  }
+  if (!parsed.trigger || typeof parsed.trigger !== "object") {
+    throw new Error("Pipeline must have a 'trigger' field");
+  }
+  if (!Array.isArray(parsed.stages) || parsed.stages.length === 0) {
+    throw new Error("Pipeline must have at least one stage");
+  }
+  if (!Array.isArray(parsed.edges)) {
+    throw new Error("Pipeline must have an 'edges' array");
+  }
+
+  return {
+    name: parsed.name as string,
+    description: (parsed.description as string) ?? "",
+    trigger: parsed.trigger as PipelineDefinition["trigger"],
+    stages: parsed.stages as StageDefinition[],
+    edges: parsed.edges as EdgeDefinition[],
+    positions: (parsed.positions as Record<string, { x: number; y: number }>) ?? {},
+  };
+}
+
+export function validateDAG(pipeline: PipelineDefinition): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const stageIds = new Set<string>();
+  const edgeIds = new Set<string>();
+
+  // Check for duplicate stage IDs
+  for (const stage of pipeline.stages) {
+    if (stageIds.has(stage.id)) {
+      errors.push(`duplicate stage id: "${stage.id}"`);
+    }
+    stageIds.add(stage.id);
+  }
+
+  // Check for duplicate edge IDs and dangling references
+  for (const edge of pipeline.edges) {
+    if (edgeIds.has(edge.id)) {
+      errors.push(`duplicate edge id: "${edge.id}"`);
+    }
+    edgeIds.add(edge.id);
+
+    if (!stageIds.has(edge.from)) {
+      errors.push(`edge "${edge.id}" references nonexistent source stage "${edge.from}"`);
+    }
+    if (!stageIds.has(edge.to)) {
+      errors.push(`edge "${edge.id}" references nonexistent target stage "${edge.to}"`);
+    }
+  }
+
+  // Cycle detection using forward edges only (loop edges excluded)
+  const cycleError = detectCycle(pipeline.stages, pipeline.edges);
+  if (cycleError) {
+    errors.push(cycleError);
+  }
+
+  // Validate loop edges
+  for (const edge of getLoopEdges(pipeline.edges)) {
+    if (!edge.max_iterations || edge.max_iterations <= 0) {
+      errors.push(`loop edge "${edge.id}" must have max_iterations > 0`);
+    }
+  }
+
+  // Validate actionId presence on Stage and FanOut
+  for (const stage of pipeline.stages) {
+    if ((stage.type === "stage" || stage.type === "fan_out") && !("actionId" in stage && stage.actionId)) {
+      errors.push(`Stage "${stage.id}" has no action selected`);
+    }
+  }
+
+  // Validate action references
+  for (const stage of pipeline.stages) {
+    if (stage.type !== "stage" && stage.type !== "fan_out") continue;
+    if (!("actionId" in stage)) continue;
+    const action = getActionById(stage.actionId);
+    if (!action) {
+      errors.push(`Stage "${stage.id}" references unknown action "${stage.actionId}"`);
+    }
+  }
+
+  // Warn about sub-pipeline stages (not yet supported at runtime)
+  for (const stage of pipeline.stages) {
+    if (stage.type === "sub-pipeline") {
+      warnings.push(`Stage "${stage.id}" uses sub-pipeline type which is not yet supported at runtime — it will be blocked during execution`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+
+function detectCycle(stages: StageDefinition[], edges: EdgeDefinition[]): string | null {
+  const adjacency = buildAdjacencyFromEdges(edges);
+
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+
+  function dfs(nodeId: string): boolean {
+    if (inStack.has(nodeId)) return true;
+    if (visited.has(nodeId)) return false;
+    visited.add(nodeId);
+    inStack.add(nodeId);
+    for (const successor of adjacency.get(nodeId) ?? []) {
+      if (dfs(successor)) return true;
+    }
+    inStack.delete(nodeId);
+    return false;
+  }
+
+  for (const stage of stages) {
+    if (dfs(stage.id)) {
+      return `cycle detected involving stage "${stage.id}"`;
+    }
+  }
+  return null;
+}

@@ -1,0 +1,28 @@
+{
+  "id": "review-error-handling",
+  "name": "Review: Error Handling (Silent Failure Hunter)",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "You are the Silent Failure Hunter. You believe silent failures are the worst kind of bug — they hide problems until they become crises.\n\nFocus:\n- Swallowed errors (empty catch blocks, ignored Promise rejections)\n- Missing error propagation (errors that should bubble up but don't)\n- Incomplete error handling (try/catch that hides the real failure mode)\n- Error messages that don't help debugging\n- Missing error boundaries in UI code\n\nFor EVERY finding, you MUST include the user impact — an error handling issue without a clear user impact statement is not a useful finding.\n\nAcceptable patterns you should NOT flag:\n- Optional UI enhancements gracefully degrading\n- Best-effort logging that doesn't affect core flow\n\nOutput `approved` if no critical/major issues. `needs_revision` if critical findings exist.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["approved", "needs_revision"] },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "severity": { "enum": ["critical", "major", "minor"] },
+            "file": { "type": "string" },
+            "line": { "type": "integer" },
+            "description": { "type": "string" },
+            "user_impact": { "type": "string" },
+            "suggestion": { "type": "string" }
+          }
+        }
+      },
+      "summary": { "type": "string" }
+    }
+  }
+}

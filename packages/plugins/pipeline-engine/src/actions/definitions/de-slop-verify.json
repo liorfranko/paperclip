@@ -1,0 +1,13 @@
+{
+  "id": "de-slop-verify",
+  "name": "De-slop Verify",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Clean up AI slop from the implementation without changing behavior.\n\nRemove:\n- Unnecessary comments (especially obvious ones like '// loop through items')\n- Dead code, unused imports, unreachable branches\n- Over-engineered abstractions (premature generalization, unnecessary wrappers)\n- Verbose variable names that add no clarity\n- Debug artifacts (console.log, print statements, TODO comments)\n\nAfter cleanup, run the full test suite to confirm nothing broke. Do NOT refactor across module boundaries.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}

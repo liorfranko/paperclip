@@ -1,0 +1,13 @@
+{
+  "id": "write-implementation",
+  "name": "Write Implementation",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Implement the feature or fix to make all tests pass (green phase).\n\n1. Read the spec and the failing tests to understand the contract\n2. Write the minimal code that makes tests pass — no speculative features\n3. Follow existing code conventions, patterns, and module boundaries\n4. Run the full test suite + lint + typecheck to confirm nothing is broken\n\nDo NOT modify existing tests to make them pass. If a test is wrong, that's a spec issue — escalate, don't fix.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}

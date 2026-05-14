@@ -1,0 +1,13 @@
+{
+  "id": "merge-pr",
+  "name": "Merge PR",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Before merging, run `gh pr checks` and verify EVERY check has status 'pass'. If ANY check is pending or failing, you MUST NOT merge. Output 'ci-blocked' and stop — a human will handle it. Only output 'done' after confirming all CI checks are green AND merging successfully.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done", "ci-blocked"] }
+    }
+  }
+}

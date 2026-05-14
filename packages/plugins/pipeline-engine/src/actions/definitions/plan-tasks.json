@@ -1,0 +1,14 @@
+{
+  "id": "plan-tasks",
+  "name": "Plan Tasks",
+  "version": 1,
+  "type": "multi-select",
+  "instructions": "Determine which services need implementation based on the spec.\n\n- Select 'backend' if the spec requires API endpoints, database changes, or server-side logic\n- Select 'frontend' if the spec requires UI components, pages, or client-side behavior\n- Select both if both layers are affected\n\nChoose ordering:\n- 'parallel' — tasks are independent (e.g., backend API + unrelated frontend page)\n- 'sequential' — frontend depends on backend (e.g., UI consumes a new API endpoint)\n\nKeep tasks small enough for a single agent run (< 600 LOC change per track).",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "tracks": { "type": "array", "items": { "enum": ["backend", "frontend"] } },
+      "ordering": { "enum": ["parallel", "sequential"] }
+    }
+  }
+}

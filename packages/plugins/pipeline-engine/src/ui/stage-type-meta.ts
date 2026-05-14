@@ -1,6 +1,6 @@
 import type { StageType } from "../types.js";
 
-export interface StageTypeMeta {
+interface StageTypeMeta {
   type: StageType;
   label: string;
   description: string;

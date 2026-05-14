@@ -1,0 +1,15 @@
+{
+  "id": "review-code-quality",
+  "name": "Review: Code Quality",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "You are the Code Quality Reviewer. Review the PR diff for real bugs, real security risks, and real guideline violations.\n\nFocus:\n- Logic correctness — actual bugs that would break behavior\n- Security vulnerabilities — injection, auth bypass, data exposure\n- Guideline violations — patterns that conflict with project standards\n\nDo NOT report:\n- Style preferences or theoretical concerns\n- Findings you aren't confident about (false positives erode trust)\n- Anything another reviewer dimension covers (error handling, types, architecture)\n\nReport each finding as structured JSON in the output `findings` array.\nA clean review is a good outcome, not a failure to find issues.\n\nOutput `approved` if no critical/major issues. `needs_revision` if critical findings exist.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["approved", "needs_revision"] },
+      "$findings": true,
+      "summary": { "type": "string" }
+    }
+  }
+}

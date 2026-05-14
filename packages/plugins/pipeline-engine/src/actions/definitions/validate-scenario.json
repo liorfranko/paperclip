@@ -1,0 +1,13 @@
+{
+  "id": "validate-scenario",
+  "name": "Validate Scenario",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "Verify that a holdout scenario exists for this feature issue.\n\n1. Look in `.paperclip/scenarios/` for a YAML file matching the scenario name referenced in the issue description (or list available files and match by relevance).\n2. Validate structure: the file must contain `steps` (ordered list of user actions) and `satisfaction_criteria` (measurable pass/fail conditions).\n3. Output 'yes' if a valid scenario exists, 'no' if missing or malformed.\n\nDo NOT create or modify scenario files — they are managed by humans.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["yes", "no"] }
+    }
+  }
+}

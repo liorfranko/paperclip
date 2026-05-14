@@ -1,0 +1,27 @@
+{
+  "id": "dispatch-code-reviews",
+  "name": "Dispatch Code Reviews",
+  "version": 1,
+  "type": "multi-select",
+  "fixed": true,
+  "instructions": "",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "tracks": {
+        "type": "array",
+        "items": {
+          "enum": [
+            "code-quality",
+            "error-handling",
+            "test-coverage",
+            "comment-quality",
+            "type-design",
+            "architecture",
+            "blind-validation"
+          ]
+        }
+      }
+    }
+  }
+}
