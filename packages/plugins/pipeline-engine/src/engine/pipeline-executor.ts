@@ -77,8 +77,6 @@ export async function materializePipeline(
 
   ctx.logger.info("Pipeline materialized", { runId, pipelineName: pipeline.name, parentIssueId });
 
-  await ctx.issues.update(parentIssueId, { status: "in_progress" }, companyId);
-
   await advancePipelineFn(ctx, runId, pipeline, companyId);
 }
 

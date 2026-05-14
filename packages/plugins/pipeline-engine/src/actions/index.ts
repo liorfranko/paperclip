@@ -13,6 +13,8 @@ import writeTests from "./definitions/write-tests.json";
 import writeImplementation from "./definitions/write-implementation.json";
 import deSlopVerify from "./definitions/de-slop-verify.json";
 import openPr from "./definitions/open-pr.json";
+import fixCi from "./definitions/fix-ci.json";
+import checkCi from "./definitions/check-ci.json";
 import reviewCodeQuality from "./definitions/review-code-quality.json";
 import reviewErrorHandling from "./definitions/review-error-handling.json";
 import reviewTestCoverage from "./definitions/review-test-coverage.json";
@@ -62,6 +64,8 @@ export const ACTIONS: readonly Action[] = [
   writeImplementation,
   deSlopVerify,
   openPr,
+  fixCi,
+  checkCi,
   reviewCodeQuality,
   reviewErrorHandling,
   reviewTestCoverage,

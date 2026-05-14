@@ -3,7 +3,7 @@
   "name": "Validate Scenario Result",
   "version": 1,
   "type": "single-decision",
-  "instructions": "Run the holdout scenario against the implementation.\n\n1. Start the full application stack\n2. Execute each scenario step against the running app\n3. Evaluate satisfaction_criteria — each criterion scores 0 or 1\n4. Calculate overall score = passed_criteria / total_criteria\n\nOutput 'valid' if score >= 0.8, 'not-valid' if below.\n\nYou MUST actually run the app and interact with it. Self-scoring by reading code is prohibited. Take screenshots as evidence for each step.",
+  "instructions": "Run the holdout scenario against the implementation.\n\n1. Start the full application stack\n2. Execute each scenario step against the running app\n3. For EACH step: take a screenshot and upload it to the issue as an attachment (see 'Uploading Attachments' in your worker skill). This is mandatory evidence — text descriptions alone are not acceptable.\n4. Evaluate satisfaction_criteria — each criterion scores 0 or 1\n5. Calculate overall score = passed_criteria / total_criteria\n\nOutput 'valid' if score >= 0.8, 'not-valid' if below.\n\nYou MUST actually run the app and interact with it. Self-scoring by reading code is prohibited.\nYou MUST upload screenshots as attachments to this issue for every scenario step. Use the attachment upload API documented in the pipeline-worker skill.",
   "outputSchema": {
     "type": "object",
     "properties": {

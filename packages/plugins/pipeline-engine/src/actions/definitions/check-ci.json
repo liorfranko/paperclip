@@ -1,0 +1,14 @@
+{
+  "id": "check-ci",
+  "name": "Check CI",
+  "version": 1,
+  "type": "multi-select",
+  "instructions": "Wait for CI checks to complete on the PR, then assess the results.\n\n1. Monitor the PR's CI status until all checks finish\n2. If ALL checks pass, output tracks: ['pass']\n3. If checks fail, determine which domain(s) caused the failure:\n   - 'backend' — build errors, type errors, lint failures, or test failures in backend code\n   - 'frontend' — build errors, type errors, lint failures, or test failures in frontend code\n   - Include both if both domains have failures\n\nDo NOT attempt to fix the issues yourself — just report which tracks need attention.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "tracks": { "type": "array", "items": { "enum": ["pass", "backend", "frontend"] } },
+      "ordering": { "enum": ["parallel", "sequential"] }
+    }
+  }
+}
