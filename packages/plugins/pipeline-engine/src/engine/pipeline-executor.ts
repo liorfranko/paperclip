@@ -152,8 +152,6 @@ export async function advancePipeline(
         ? await stateMachine.getRunStages(runId)
         : stageRows;
 
-      await postProgressComment(ctx, run.parentIssueId, companyId, pipeline, currentRows);
-
       const readyStages = await router.getReadyStages(pipeline, currentRows, loopEdgeCounts);
 
       // Handle loop edges: if a stage became ready via a loop edge, reset the loop body + target
@@ -317,6 +315,17 @@ export async function advancePipeline(
     await stateMachine.updateRunStatus(runId, "failed");
     ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: null, status: "failed" });
   } finally {
+    const run = await stateMachine.getRun(runId);
+    if (run) {
+      const finalRows = await stateMachine.getRunStages(runId);
+      try {
+        await postProgressComment(ctx, run.parentIssueId, companyId, pipeline, finalRows);
+      } catch (err) {
+        ctx.logger.warn("Failed to post progress comment — pipeline continues", {
+          runId, parentIssueId: run.parentIssueId, error: String(err),
+        });
+      }
+    }
     await stateMachine.releaseAdvisoryLock(runId);
   }
 }
