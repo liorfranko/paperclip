@@ -63,13 +63,21 @@ export class Dispatcher {
       originId: `${pipelineRunId}:${stage.id}`,
     });
 
-    const wakeup = await this.issues.requestWakeup(issue.id, companyId, {
-      reason: `plugin:pipeline-engine:${stage.id}`,
-      contextSource: "plugin-pipeline-engine",
-      idempotencyKey: `${pipelineRunId}:${stage.id}:${Date.now()}`,
-    });
+    // Wakeup is best-effort — agent may be paused, budget-blocked, etc.
+    // The issue is created and assigned; the agent will pick it up when it's next active.
+    let wakeupQueued = false;
+    try {
+      const wakeup = await this.issues.requestWakeup(issue.id, companyId, {
+        reason: `plugin:pipeline-engine:${stage.id}`,
+        contextSource: "plugin-pipeline-engine",
+        idempotencyKey: `${pipelineRunId}:${stage.id}:${Date.now()}`,
+      });
+      wakeupQueued = wakeup.queued;
+    } catch {
+      // Non-fatal: issue exists and is assigned. Agent will pick up when available.
+    }
 
-    return { issueId: issue.id, wakeupQueued: wakeup.queued };
+    return { issueId: issue.id, wakeupQueued };
   }
 
   private async resolveAgent(agentRole: string, companyId: string): Promise<string> {
