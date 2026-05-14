@@ -44,7 +44,7 @@ function resolveFragments(schema: JsonSchema): JsonSchema {
 }
 
 function loadAction(raw: Record<string, unknown>): Action {
-  const action = raw as unknown as Action;
+  const action = { ...(raw as unknown as Action) };
   action.outputSchema = resolveFragments(action.outputSchema);
   return action;
 }

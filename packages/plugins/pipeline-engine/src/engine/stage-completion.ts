@@ -59,7 +59,10 @@ export async function handleCommentEvent(
 
   const comments = await ctx.issues.listComments(issueId, event.companyId);
   const comment = comments.find((c) => c.id === payload.commentId);
-  if (!comment) return;
+  if (!comment) {
+    ctx.logger.debug("Comment not found — may have been deleted", { issueId, commentId: payload.commentId });
+    return;
+  }
 
   const body = comment.body;
 
@@ -87,7 +90,12 @@ export async function handleCommentEvent(
   const output = extraction.data!;
 
   const run = await stateMachine.getRun(stageRow.pipelineRunId);
-  if (!run) return;
+  if (!run) {
+    ctx.logger.error("Pipeline run not found for stage with valid output — output discarded", {
+      pipelineRunId: stageRow.pipelineRunId, stageId: stageRow.stageId,
+    });
+    return;
+  }
 
   const pipeline = safeParsePipelineJson(run.pipelineYaml);
   if (!pipeline) {

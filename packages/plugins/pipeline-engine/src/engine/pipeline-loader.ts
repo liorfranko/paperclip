@@ -23,7 +23,7 @@ export async function getPipelineRegistry(ctx: PluginContext): Promise<string[]>
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
-      ctx.logger.warn("Pipeline registry state is not an array after parsing");
+      ctx.logger.error("Pipeline registry state is not an array — all pipelines invisible until repaired");
     } catch (err) {
       ctx.logger.error("Pipeline registry state is corrupted JSON", { error: String(err) });
     }
@@ -53,7 +53,7 @@ export async function loadPipelines(ctx: PluginContext): Promise<PipelineDefinit
           ctx.logger.warn("Invalid pipeline definition", { pipelineName, errors: validation.errors });
         }
       } else {
-        ctx.logger.warn("Failed to parse pipeline JSON", { pipelineName });
+        ctx.logger.warn("Failed to parse pipeline JSON", { pipelineName, contentType: typeof jsonContent });
       }
     }
   }
@@ -95,7 +95,9 @@ export async function seedBundledPipelines(ctx: PluginContext, importMetaUrl: st
       }
       ctx.logger.info("Seeded bundled pipeline", { name });
     } catch (err) {
-      ctx.logger.warn("Failed to seed bundled pipeline", { name, error: String(err) });
+      const code = (err as NodeJS.ErrnoException).code;
+      const level = code === "ENOENT" ? "error" : "warn";
+      ctx.logger[level]("Failed to seed bundled pipeline", { name, error: String(err), code });
     }
   }
 }

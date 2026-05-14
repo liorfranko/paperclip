@@ -67,7 +67,10 @@ export async function handleStageFailure(
   const parentIssue = await ctx.issues.get(run.parentIssueId, companyId);
 
   const claimed = await stateMachine.claimStageForDispatch(gotoTargetRow.id);
-  if (!claimed) return;
+  if (!claimed) {
+    ctx.logger.warn("Failed to claim retry target — another process may have taken it", { runId, stageId: failureAction.targetStageId });
+    return;
+  }
 
   ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: failureAction.targetStageId, status: "running" });
 

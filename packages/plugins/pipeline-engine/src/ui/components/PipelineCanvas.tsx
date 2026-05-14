@@ -178,7 +178,7 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
         stages,
         edges: edgeDefs,
         positions: Object.fromEntries(
-          rfNodes.map(n => [n.id, n.position]),
+          nodes.map(n => [n.id, n.position]),
         ),
       };
       await savePipeline({ name, content: JSON.stringify(updatedPipeline) });
@@ -188,7 +188,7 @@ export function PipelineCanvas({ pipeline, onSaved }: PipelineCanvasProps) {
     } finally {
       setSaving(false);
     }
-  }, [name, description, triggerLabel, stages, edgeDefs, rfNodes, savePipeline, onSaved]);
+  }, [name, description, triggerLabel, stages, edgeDefs, nodes, savePipeline, onSaved]);
 
   const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
   const selectedRfEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
