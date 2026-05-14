@@ -1,0 +1,13 @@
+{
+  "id": "fix-ci",
+  "name": "Fix CI",
+  "version": 1,
+  "type": "single-decision",
+  "instructions": "The CI pipeline is failing on the PR. Your job is to get the issues fixed.\n\n1. Read the CI failure logs from the PR checks\n2. Identify the root cause (build errors, type errors, lint failures, test failures)\n3. Fix each issue with minimal changes — do NOT refactor unrelated code\n4. Push fixes to the branch\n5. Wait for the CI checks to complete and verify they pass\n6. If CI still fails, repeat from step 1\n\nOutput 'done' only when CI checks are green.",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "decision": { "enum": ["done"] }
+    }
+  }
+}
