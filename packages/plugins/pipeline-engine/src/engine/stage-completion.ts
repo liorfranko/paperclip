@@ -138,6 +138,7 @@ export async function handleCommentEvent(
     ctx.logger.warn("Stage output contains blocking decision — escalating to human", {
       stageId: stageRow.stageId, pipelineRunId: stageRow.pipelineRunId, decision: output.decision,
     });
+    await ctx.issues.update(issueId, { status: "blocked" }, event.companyId);
     await stateMachine.updateRunStatus(stageRow.pipelineRunId, "escalated");
     ctx.streams.emit(STREAM_RUN_PROGRESS, { runId: run.id, stageId: stageRow.stageId, status: "escalated" });
     return;
