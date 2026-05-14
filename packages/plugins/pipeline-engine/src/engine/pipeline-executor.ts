@@ -3,6 +3,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import { getActionById } from "../actions/index.js";
 import { MAX_ADVANCE_ITERATIONS, STREAM_RUN_PROGRESS } from "../protocol.js";
 import { buildStageContext } from "./context-builder.js";
+import { getIncomingEdges } from "./edge-utils.js";
 import { getLoopBodyStageIds } from "./loop-resolver.js";
 import type { Dispatcher } from "./dispatcher.js";
 import type { Router } from "./router.js";
@@ -193,6 +194,16 @@ export async function advancePipeline(
           ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: stageDef.id, status: "completed" });
 
           await ctx.issues.update(run.parentIssueId, { status: "blocked" }, companyId);
+
+          // Mark upstream sub-issues that routed into this block stage as "blocked"
+          const incomingEdges = getIncomingEdges(stageDef.id, pipeline.edges ?? []);
+          for (const edge of incomingEdges) {
+            const upstreamRow = currentRows.find((s) => s.stageId === edge.from);
+            if (upstreamRow?.subIssueId) {
+              await ctx.issues.update(upstreamRow.subIssueId, { status: "blocked" }, companyId);
+            }
+          }
+
           await ctx.issues.createComment(
             run.parentIssueId,
             `⏸️ Pipeline blocked at stage \`${stageDef.id}\`:\n\n${stageDef.reason}\n\nUnblock the issue to resume the pipeline.`,
