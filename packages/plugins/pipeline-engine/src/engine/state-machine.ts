@@ -122,7 +122,7 @@ export class StateMachine {
 
   async setStageOutput(stageRowId: string, output: Record<string, unknown>): Promise<void> {
     await this.db.execute(
-      `UPDATE ${this.table("pipeline_stages")} SET output = $1::jsonb WHERE id = $2`,
+      `UPDATE ${this.table("pipeline_stages")} SET output = $1::jsonb WHERE id = $2 AND status != 'completed'`,
       [JSON.stringify(output), stageRowId],
     );
   }

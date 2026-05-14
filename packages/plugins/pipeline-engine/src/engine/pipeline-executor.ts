@@ -10,6 +10,30 @@ import type { Router } from "./router.js";
 import type { StateMachine } from "./state-machine.js";
 import type { PipelineDefinition, StageDefinition } from "../types.js";
 
+const PROGRESS_SENTINEL = "<!-- pipeline-progress -->";
+
+async function postProgressComment(
+  ctx: PluginContext,
+  parentIssueId: string,
+  companyId: string,
+  pipeline: PipelineDefinition,
+  stageRows: Array<{ stageId: string; status: string }>,
+): Promise<void> {
+  const lines = pipeline.stages.map((s) => {
+    const row = stageRows.find((r) => r.stageId === s.id);
+    const status = row?.status ?? "pending";
+    const icon =
+      status === "completed" ? "✅" :
+      status === "running" ? "🔄" :
+      status === "failed" ? "❌" :
+      status === "skipped" ? "⏭️" : "⬜";
+    return `${icon} \`${s.id}\``;
+  });
+
+  const body = `${PROGRESS_SENTINEL}\n### Pipeline Progress\n\n${lines.join("\n")}`;
+  await ctx.issues.createComment(parentIssueId, body, companyId, {});
+}
+
 export async function materializePipeline(
   ctx: PluginContext,
   pipeline: PipelineDefinition,
@@ -52,6 +76,8 @@ export async function materializePipeline(
   }
 
   ctx.logger.info("Pipeline materialized", { runId, pipelineName: pipeline.name, parentIssueId });
+
+  await ctx.issues.update(parentIssueId, { status: "in_progress" }, companyId);
 
   await advancePipelineFn(ctx, runId, pipeline, companyId);
 }
@@ -126,6 +152,8 @@ export async function advancePipeline(
         ? await stateMachine.getRunStages(runId)
         : stageRows;
 
+      await postProgressComment(ctx, run.parentIssueId, companyId, pipeline, currentRows);
+
       const readyStages = await router.getReadyStages(pipeline, currentRows, loopEdgeCounts);
 
       // Handle loop edges: if a stage became ready via a loop edge, reset the loop body + target
@@ -148,6 +176,7 @@ export async function advancePipeline(
           await stateMachine.updateRunStatus(runId, "completed");
           ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: null, status: "completed" });
           ctx.logger.info("Pipeline completed", { runId });
+          await ctx.issues.update(run.parentIssueId, { status: "done" }, companyId);
         } else if (anyFailed && !currentRows.some((s) => s.status === "running" || s.status === "pending")) {
           await stateMachine.updateRunStatus(runId, "failed");
           ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: null, status: "failed" });
