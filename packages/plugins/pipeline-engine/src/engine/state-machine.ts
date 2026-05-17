@@ -217,7 +217,7 @@ export class StateMachine {
       updated_at: string;
     }>(
       `SELECT * FROM ${this.table("pipeline_runs")}
-       WHERE parent_issue_id = $1 AND company_id = $2 AND status = 'running'
+       WHERE parent_issue_id = $1 AND company_id = $2 AND status IN ('running', 'paused', 'escalated')
        LIMIT 1`,
       [parentIssueId, companyId],
     );
