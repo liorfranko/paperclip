@@ -1,10 +1,9 @@
 {
   "id": "dispatch-code-reviews",
   "name": "Dispatch Code Reviews",
-  "version": 1,
+  "version": 2,
   "type": "multi-select",
-  "fixed": true,
-  "instructions": "",
+  "instructions": "Inspect the PR diff and decide which review tracks are relevant. Follow these rules:\n\n**Change size heuristics:**\n- < 100 LOC changed: select only `code-quality` and `test-coverage`\n- 100–500 LOC changed: additionally select `error-handling` and `type-design`\n- 500+ LOC changed: select all applicable tracks (full review)\n\n**Change type overrides:**\n- Pure test files (only *_test.* / *.spec.* modified): select only `test-coverage`\n- Pure UI changes (only components/styles, no logic): skip `architecture`\n- Infrastructure or config changes (CI, Dockerfiles, package manifests): add `architecture`\n\n**Pattern-based additions:**\n- If diff contains try/catch, error boundaries, or Result types: add `error-handling`\n- If diff contains type/interface definitions or generics: add `type-design`\n- If diff introduces new files (not just modifications): add `architecture`\n\n**Invariants:**\n- Always include `code-quality` — it is the minimum baseline for every review\n- Only include `blind-validation` when the PR implements a feature with holdout scenarios (e.g., A/B tests, feature flags with control groups)\n- Include `comment-quality` when the diff adds or modifies comments, JSDoc, or documentation strings\n\nReturn the selected tracks as an array.",
   "outputSchema": {
     "type": "object",
     "properties": {
@@ -21,6 +20,10 @@
             "blind-validation"
           ]
         }
+      },
+      "ordering": {
+        "type": "string",
+        "enum": ["parallel", "sequential"]
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "autonomous-dev",
-  "version": 6,
+  "version": 7,
   "description": "Full autonomous development pipeline — triage → validate → plan → implement → review (7 specialized reviewers) → gate → simplify → validate",
   "trigger": { "label": "pipeline:autonomous-dev" },
   "stages": [
@@ -25,7 +25,7 @@
     { "id": "fix-ci-backend", "type": "stage", "agent_role": "pipe-backend", "actionId": "fix-ci" },
     { "id": "fix-ci-frontend", "type": "stage", "agent_role": "pipe-frontend", "actionId": "fix-ci" },
     { "id": "ci-fix-sync", "type": "fan_in" },
-    { "id": "dispatch-reviews", "type": "fan_out", "actionId": "dispatch-code-reviews" },
+    { "id": "dispatch-reviews", "type": "fan_out", "agent_role": "pipe-reviewer", "actionId": "dispatch-code-reviews" },
 
     { "id": "review-code-quality", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-code-quality" },
     { "id": "review-error-handling", "type": "stage", "agent_role": "pipe-reviewer", "actionId": "review-error-handling" },

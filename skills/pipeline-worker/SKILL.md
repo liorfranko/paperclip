@@ -54,16 +54,23 @@ Focus entirely on producing the deliverable your role requires.
 
 ## Posting Structured Output
 
-When your work is complete, post a comment on your issue with this exact format:
+**CRITICAL:** When your work is complete, you MUST post a comment **on this Paperclip issue** (your task issue, identified by `PAPERCLIP_TASK_ID`). Do NOT post output on GitHub issues, PRs, Jira, or any other external system. The pipeline engine only watches for comments on YOUR Paperclip task issue.
 
 ````
-POST /api/issues/{PAPERCLIP_TASK_ID}/comments
+POST ${PAPERCLIP_API_URL}/api/issues/${PAPERCLIP_TASK_ID}/comments
+Authorization: Bearer ${PAPERCLIP_API_KEY}
+X-Paperclip-Run-Id: ${PAPERCLIP_RUN_ID}
+
 {
   "body": "<!-- pipeline-output -->\n```json\n{YOUR_JSON_OUTPUT}\n```"
 }
 ````
 
+The comment body must start with the sentinel `<!-- pipeline-output -->` immediately followed by a fenced JSON code block. The pipeline engine uses this exact pattern to detect completion and extract your output.
+
 The JSON must conform to the schema provided in your issue description's "Required Schema" section. The engine injects the full JSON Schema into every task issue — read it there. Do not rely on memorized schemas.
+
+**Verification:** After posting, you can confirm the comment was created by checking the response status (201). If the post fails, retry once. Do NOT mark the issue as "done" yourself — the engine handles status transitions.
 
 ## Uploading Attachments (Screenshots, Files)
 

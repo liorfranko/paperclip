@@ -29,6 +29,7 @@ import type {
   RequestConfirmationInteraction,
   CreateIssueThreadInteraction,
   PluginIssueOriginKind,
+  IssueOriginKind,
   IssueSurfaceVisibility,
   PluginManagedAgentResolution,
   PluginManagedProjectResolution,
@@ -1261,7 +1262,7 @@ export interface PluginIssuesClient {
     companyId: string;
     projectId?: string;
     assigneeAgentId?: string;
-    originKind?: PluginIssueOriginKind;
+    originKind?: IssueOriginKind | string;
     originKindPrefix?: string;
     originId?: string;
     status?: Issue["status"];

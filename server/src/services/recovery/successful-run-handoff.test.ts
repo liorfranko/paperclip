@@ -177,6 +177,15 @@ describe("successful run handoff decision", () => {
     });
   });
 
+  it("does not queue for plugin-managed issues", () => {
+    expect(decide({
+      issue: { ...issue, originKind: "plugin:paperclipai.pipeline-engine" } as any,
+    })).toEqual({
+      kind: "skip",
+      reason: "plugin-managed issue (pipeline-engine or similar plugin owns lifecycle)",
+    });
+  });
+
   it("uses a stable one-attempt idempotency key", () => {
     expect(buildFinishSuccessfulRunHandoffIdempotencyKey({
       issueId: "issue-1",
