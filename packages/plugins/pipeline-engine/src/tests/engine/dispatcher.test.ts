@@ -95,6 +95,7 @@ describe("dispatcher", () => {
     });
     const createCall = issues.create.mock.calls[0][0];
     expect(createCall.description).toContain("Output Format");
+    expect(createCall.description).toContain("STOP IMMEDIATELY");
     expect(createCall.description).not.toContain("Required Schema");
   });
 });

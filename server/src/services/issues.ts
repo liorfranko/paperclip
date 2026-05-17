@@ -2871,7 +2871,11 @@ export function issueService(db: Db) {
             // issue to reuse the parent's workspace once it exists so the
             // heartbeat can resolve it lazily instead of creating a new one.
             executionWorkspacePreference = "reuse_existing";
-            const parentSettings = (workspaceSource.executionWorkspaceSettings as Record<string, unknown> | null | undefined) ?? {};
+            const rawSettings = workspaceSource.executionWorkspaceSettings;
+            const parentSettings =
+              rawSettings && typeof rawSettings === "object" && !Array.isArray(rawSettings)
+                ? (rawSettings as Record<string, unknown>)
+                : {};
             if (Object.keys(parentSettings).length > 0) {
               executionWorkspaceSettings = { ...parentSettings };
             }

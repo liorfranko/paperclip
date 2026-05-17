@@ -1820,6 +1820,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       }
 
       if (issue.originKind?.startsWith("plugin:")) {
+        logger.debug({ issueId: issue.id, originKind: issue.originKind }, "Skipping recovery for plugin-managed issue");
         result.skipped += 1;
         continue;
       }

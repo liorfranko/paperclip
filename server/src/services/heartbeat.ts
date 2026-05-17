@@ -7002,10 +7002,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         .then((rows) => rows[0] ?? null);
       if (parentIssue?.executionWorkspaceId) {
         resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
-      }
-      if (parentIssue?.identifier) {
         parentIdentifier = parentIssue.identifier;
         parentTitle = parentIssue.title;
+      } else {
+        logger.debug(
+          { issueId, parentId: issueRef.parentId, found: !!parentIssue },
+          "Deferred workspace inheritance: parent workspace not available yet",
+        );
       }
     }
     const existingExecutionWorkspace =
@@ -7278,22 +7281,32 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       if (Object.keys(nextIssuePatch).length > 0) {
         await issuesSvc.update(issueId, nextIssuePatch);
       }
-      // Propagate workspace to parent so sibling sub-issues can inherit it
+      // Propagate workspace to parent so sibling sub-issues can inherit it (best-effort, CAS guard)
       if (
         issueRef?.parentId &&
         issueRef.executionWorkspacePreference === "reuse_existing" &&
         !issueRef.executionWorkspaceId
       ) {
-        const parentIssue = await db
-          .select({ executionWorkspaceId: issues.executionWorkspaceId })
-          .from(issues)
-          .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
-          .then((rows) => rows[0] ?? null);
-        if (parentIssue && !parentIssue.executionWorkspaceId) {
-          await issuesSvc.update(issueRef.parentId, {
-            executionWorkspaceId: persistedExecutionWorkspace.id,
-            executionWorkspacePreference: "reuse_existing",
-          });
+        try {
+          await db
+            .update(issues)
+            .set({
+              executionWorkspaceId: persistedExecutionWorkspace.id,
+              executionWorkspacePreference: "reuse_existing",
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(issues.id, issueRef.parentId),
+                eq(issues.companyId, agent.companyId),
+                isNull(issues.executionWorkspaceId),
+              ),
+            );
+        } catch (err) {
+          logger.warn(
+            { err, issueId, parentId: issueRef.parentId, executionWorkspaceId: persistedExecutionWorkspace.id },
+            "Failed to propagate execution workspace to parent issue",
+          );
         }
       }
     }
