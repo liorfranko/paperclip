@@ -140,6 +140,38 @@ export async function handleCommentEvent(
 
   await ctx.issues.update(issueId, { status: "done" }, event.companyId);
 
+  // Proactive cleanup: cancel any recovery issues that the liveness monitor may have
+  // created on this stage issue during the race window between agent completion and
+  // this status update. This prevents sub-issue status propagation from blocking the
+  // pipeline root.
+  try {
+    const recoveryIssues = await ctx.issues.list({
+      companyId: event.companyId,
+      originId: issueId,
+      originKind: "stranded_issue_recovery",
+    });
+    for (const recovery of recoveryIssues) {
+      if (recovery.status === "done" || recovery.status === "cancelled") continue;
+      ctx.logger.info("Proactively cancelling recovery issue on completed stage", {
+        recoveryIssueId: recovery.id,
+        recoveryIdentifier: recovery.identifier,
+        stageIssueId: issueId,
+      });
+      await ctx.issues.update(recovery.id, { status: "done" }, event.companyId);
+      // Remove blocker relation if it exists
+      const stageRelations = await ctx.issues.relations.get(issueId, event.companyId);
+      const isBlocking = stageRelations.blockedBy.some((b) => b.id === recovery.id);
+      if (isBlocking) {
+        await ctx.issues.relations.removeBlockers(issueId, [recovery.id], event.companyId);
+      }
+    }
+  } catch (err) {
+    ctx.logger.warn("Failed to clean recovery issues on stage completion (non-fatal)", {
+      issueId,
+      error: String(err),
+    });
+  }
+
 
   if (isBlockingDecision(output)) {
     ctx.logger.warn("Stage output contains blocking decision — escalating to human", {

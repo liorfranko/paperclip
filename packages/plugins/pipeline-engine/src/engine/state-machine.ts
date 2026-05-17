@@ -270,6 +270,40 @@ export class StateMachine {
     };
   }
 
+  async getAnyRunForIssue(parentIssueId: string, companyId: string): Promise<PipelineRun | null> {
+    const rows = await this.db.query<{
+      id: string;
+      company_id: string;
+      parent_issue_id: string;
+      pipeline_name: string;
+      pipeline_version: number;
+      pipeline_yaml: string;
+      status: PipelineRunStatus;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT * FROM ${this.table("pipeline_runs")}
+       WHERE parent_issue_id = $1 AND company_id = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [parentIssueId, companyId],
+    );
+
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      companyId: r.company_id,
+      parentIssueId: r.parent_issue_id,
+      pipelineName: r.pipeline_name,
+      pipelineVersion: r.pipeline_version,
+      pipelineYaml: r.pipeline_yaml,
+      status: r.status,
+      createdAt: new Date(r.created_at),
+      updatedAt: new Date(r.updated_at),
+    };
+  }
+
   async getStageBySubIssueId(subIssueId: string): Promise<PipelineStage | null> {
     const rows = await this.db.query<{
       id: string;

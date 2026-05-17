@@ -6,6 +6,7 @@ import { safeParsePipelineJson } from "../engine/pipeline-loader.js";
 import { STREAM_RUN_PROGRESS } from "../protocol.js";
 import { handleCommentEvent } from "../engine/stage-completion.js";
 import { handleStageFailure } from "../engine/failure-handler.js";
+import { handleRecoveryIssueCreated, handleStageReBlocked, handlePipelineRootBlocked } from "../engine/recovery-cleanup.js";
 import type { Router } from "../engine/router.js";
 import type { Dispatcher } from "../engine/dispatcher.js";
 
@@ -73,6 +74,7 @@ async function resolveLabelNames(ctx: PluginContext, labelIds: string[], company
 export function registerTriggers(ctx: PluginContext, deps: TriggerDeps): void {
   ctx.events.on("issue.created", async (event: PluginEvent) => {
     try {
+      await handleRecoveryIssueCreated(ctx, event, deps.stateMachine);
       await handleIssueEvent(ctx, event, deps);
     } catch (err) {
       ctx.logger.error("Unhandled error in issue.created handler", {
@@ -86,6 +88,8 @@ export function registerTriggers(ctx: PluginContext, deps: TriggerDeps): void {
 
   ctx.events.on("issue.updated", async (event: PluginEvent) => {
     try {
+      await handleStageReBlocked(ctx, event, deps.stateMachine);
+      await handlePipelineRootBlocked(ctx, event, deps.stateMachine);
       await handleIssueUnblock(ctx, event, deps);
       await handleIssueEvent(ctx, event, deps);
     } catch (err) {
