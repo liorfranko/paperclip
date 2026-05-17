@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { Router } from "../../engine/router.js";
 import type { PipelineDefinition } from "../../types.js";
 
-const fixedFanoutPipeline: PipelineDefinition = {
-  name: "fixed-fanout",
+const agentDispatchedFanoutPipeline: PipelineDefinition = {
+  name: "agent-dispatched-fanout",
   description: "",
-  trigger: { label: "pipeline:fixed" },
+  trigger: { label: "pipeline:dispatch" },
   stages: [
     { id: "open-pr", type: "fan_in" },
-    { id: "dispatch", type: "fan_out", actionId: "dispatch-code-reviews", agent_role: "dispatcher" },
+    { id: "dispatch", type: "fan_out", actionId: "dispatch-code-reviews", agent_role: "pipe-reviewer" },
     { id: "review-quality", type: "stage", agent_role: "reviewer", actionId: "triage-new-issues" },
     { id: "review-errors", type: "stage", agent_role: "reviewer", actionId: "triage-new-issues" },
     { id: "review-tests", type: "stage", agent_role: "reviewer", actionId: "triage-new-issues" },
@@ -30,22 +30,22 @@ const fixedFanoutPipeline: PipelineDefinition = {
   positions: {},
 };
 
-describe("fixed fan-out (deterministic)", () => {
+describe("fan-out dispatch (agent-dispatched)", () => {
   const router = new Router();
 
-  it("requiresAgentDispatch returns false for fixed fan-out", () => {
-    const stage = fixedFanoutPipeline.stages.find((s) => s.id === "dispatch")!;
-    expect(router.requiresAgentDispatch(stage)).toBe(false);
+  it("requiresAgentDispatch returns true for non-fixed fan-out action", () => {
+    const stage = agentDispatchedFanoutPipeline.stages.find((s) => s.id === "dispatch")!;
+    expect(router.requiresAgentDispatch(stage)).toBe(true);
   });
 
-  it("getFixedFanoutOutput returns all tracks for fixed action", () => {
-    const stage = fixedFanoutPipeline.stages.find((s) => s.id === "dispatch")!;
+  it("getFixedFanoutOutput returns null for non-fixed fan-out action", () => {
+    const stage = agentDispatchedFanoutPipeline.stages.find((s) => s.id === "dispatch")!;
     const output = router.getFixedFanoutOutput(stage);
-    expect(output).toEqual({ tracks: ["code-quality", "error-handling", "test-coverage", "comment-quality", "type-design", "architecture", "blind-validation"], ordering: "parallel" });
+    expect(output).toBeNull();
   });
 
-  it("getFixedFanoutOutput returns null for non-fixed stage", () => {
-    const stage = fixedFanoutPipeline.stages.find((s) => s.id === "review-quality")!;
+  it("getFixedFanoutOutput returns null for non-fan_out stage", () => {
+    const stage = agentDispatchedFanoutPipeline.stages.find((s) => s.id === "review-quality")!;
     const output = router.getFixedFanoutOutput(stage);
     expect(output).toBeNull();
   });
