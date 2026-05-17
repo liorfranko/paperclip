@@ -1819,6 +1819,11 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
+      if (issue.originKind?.startsWith("plugin:")) {
+        result.skipped += 1;
+        continue;
+      }
+
       if (await hasActiveExecutionPath(issue.companyId, issue.id)) {
         result.skipped += 1;
         continue;
