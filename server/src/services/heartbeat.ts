@@ -6987,6 +6987,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       delete context.paperclipTaskMarkdown;
     }
     let resolvedExecutionWorkspaceId = issueRef?.executionWorkspaceId ?? null;
+    let parentIdentifier: string | null = null;
     // Deferred inheritance: if reuse_existing but no workspace ID yet, look up parent's workspace
     if (
       !resolvedExecutionWorkspaceId &&
@@ -6994,12 +6995,15 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       issueRef.parentId
     ) {
       const parentIssue = await db
-        .select({ executionWorkspaceId: issues.executionWorkspaceId })
+        .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier })
         .from(issues)
         .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
         .then((rows) => rows[0] ?? null);
       if (parentIssue?.executionWorkspaceId) {
         resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
+      }
+      if (parentIssue?.identifier) {
+        parentIdentifier = parentIssue.identifier;
       }
     }
     const existingExecutionWorkspace =
@@ -7179,7 +7183,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
                       ? "adapter_managed"
                       : "shared_workspace",
               strategyType: executionWorkspace.strategy === "git_worktree" ? "git_worktree" : "project_primary",
-              name: executionWorkspace.branchName ?? issueRef?.identifier ?? `workspace-${agent.id.slice(0, 8)}`,
+              name: executionWorkspace.branchName ?? parentIdentifier ?? issueRef?.identifier ?? `workspace-${agent.id.slice(0, 8)}`,
               status: "active",
               cwd: executionWorkspace.cwd,
               repoUrl: executionWorkspace.repoUrl,
