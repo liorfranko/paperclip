@@ -7269,6 +7269,24 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       if (Object.keys(nextIssuePatch).length > 0) {
         await issuesSvc.update(issueId, nextIssuePatch);
       }
+      // Propagate workspace to parent so sibling sub-issues can inherit it
+      if (
+        issueRef?.parentId &&
+        issueRef.executionWorkspacePreference === "reuse_existing" &&
+        !issueRef.executionWorkspaceId
+      ) {
+        const parentIssue = await db
+          .select({ executionWorkspaceId: issues.executionWorkspaceId })
+          .from(issues)
+          .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
+          .then((rows) => rows[0] ?? null);
+        if (parentIssue && !parentIssue.executionWorkspaceId) {
+          await issuesSvc.update(issueRef.parentId, {
+            executionWorkspaceId: persistedExecutionWorkspace.id,
+            executionWorkspacePreference: "reuse_existing",
+          });
+        }
+      }
     }
     if (persistedExecutionWorkspace) {
       context.executionWorkspaceId = persistedExecutionWorkspace.id;
