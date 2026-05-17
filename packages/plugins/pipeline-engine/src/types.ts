@@ -7,6 +7,8 @@ export type StageType = "stage" | "fan_out" | "fan_in" | "sub-pipeline" | "block
 interface BaseStage {
   id: string;
   checkpoint?: boolean;
+  template?: boolean;
+  trackName?: string;
 }
 
 export interface Stage extends BaseStage {
@@ -54,6 +56,7 @@ export interface EdgeDefinition {
   activationKey?: string;
   max_iterations?: number;
   label?: string;
+  template?: boolean;
 }
 
 export interface PipelineDefinition {
