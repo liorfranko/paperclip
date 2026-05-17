@@ -3,7 +3,7 @@
   "name": "Validate Spec",
   "version": 1,
   "type": "single-decision",
-  "instructions": "Review the design spec referenced in the issue for implementation-readiness.\n\nA spec is ready ('yes') when it covers:\n- **Architecture**: which modules/files are affected and how they interact\n- **Data flow**: inputs, transformations, outputs, and persistence\n- **Error handling**: failure modes and recovery strategies\n- **Testing strategy**: what to test and at which layer\n- **Definition of Done**: checkable acceptance criteria\n\nOutput 'no' if any of these are missing or too vague to implement without guessing.",
+  "instructions": "Review the design spec referenced in the issue for implementation-readiness.\n\nA spec is ready ('yes') when it covers:\n- **Architecture**: which modules/files are affected and how they interact\n- **Data flow**: inputs, transformations, outputs, and persistence\n- **Error handling**: failure modes and recovery strategies\n- **Testing strategy**: what to test and at which layer\n- **Definition of Done**: checkable acceptance criteria\n- **Implementation fidelity**: the spec includes exact values (colors as hex codes, dimensions in px, font sizes, specific text labels) that an implementer cannot guess. Vague descriptions like 'dark background' or 'navigation items' without specific values mean 'no'.\n\nOutput 'no' if any of these are missing, too vague to implement without guessing, OR if the spec lacks pixel-level precision (exact colors, dimensions, font properties) needed to match a design.",
   "outputSchema": {
     "type": "object",
     "properties": {

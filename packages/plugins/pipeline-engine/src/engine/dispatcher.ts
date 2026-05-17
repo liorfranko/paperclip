@@ -108,7 +108,7 @@ export class Dispatcher {
   }
 
   private buildOutputInstructions(outputSchema: object | undefined): string {
-    const format = `\n\n---\n### Output Format\nWhen you have completed this task, post a comment containing your structured result in this exact format:\n\n\`\`\`\n${OUTPUT_SENTINEL}\n\\\`\\\`\\\`json\n{ ... your JSON result ... }\n\\\`\\\`\\\`\n\`\`\``;
+    const format = `\n\n---\n### Output Format\n\n**IMPORTANT:** When you have completed this task, you MUST post your structured result as a **comment on THIS Paperclip issue** (the issue you are currently working on). Do NOT post it on GitHub, Jira, or any external system. Use the Paperclip API:\n\n\`\`\`\nPOST /api/issues/{PAPERCLIP_TASK_ID}/comments\n{"body": "${OUTPUT_SENTINEL}\\n\\\`\\\`\\\`json\\n{ ... your JSON result ... }\\n\\\`\\\`\\\`"}\n\`\`\`\n\nThe comment body must start with the sentinel \`${OUTPUT_SENTINEL}\` followed by a JSON code block. This is how the pipeline engine detects your completion.`;
 
     if (!outputSchema) return format;
 
