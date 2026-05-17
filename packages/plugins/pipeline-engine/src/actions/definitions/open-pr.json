@@ -1,9 +1,9 @@
 {
   "id": "open-pr",
   "name": "Open PR",
-  "version": 1,
+  "version": 2,
   "type": "single-decision",
-  "instructions": "Create a pull request for the implementation.\n\n1. Ensure branch is rebased on latest main with no conflicts\n2. Write a concise PR title (< 70 chars, imperative mood)\n3. PR body must include: summary of changes, test plan, and reference to the parent issue\n4. If this is a feature track, link the design spec path\n\nDo NOT merge — just open the PR and output 'done'.",
+  "instructions": "Create a pull request for the implementation.\n\n## Pre-flight Check\n\nVerify the feature branch exists and has commits ahead of main:\n```bash\ngit branch --show-current\n# Must be feature/<issue-id>-<slug>, NOT main\n\ngit log main..HEAD --oneline\n# Must show commits (spec, tests, implementation)\n```\n\nIf commits are on main instead of a branch, create a branch retroactively:\n```bash\n# Find where main was before our commits\ngit log --oneline main | head -10\n# Create branch from current HEAD, reset main to before our commits\ngit checkout -b feature/<issue-id>-<slug>\ngit push -u origin feature/<issue-id>-<slug>\n```\n\n## PR Creation\n\n1. Ensure the feature branch is rebased on latest main with no conflicts:\n```bash\ngit fetch origin\ngit rebase origin/main\ngit push --force-with-lease origin feature/<issue-id>-<slug>\n```\n\n2. Write a concise PR title (< 70 chars, imperative mood)\n\n3. Create the PR with `gh pr create`:\n```bash\ngh pr create \\\n  --title \"feat: <description>\" \\\n  --body \"## Summary\\n\\n<what changed>\\n\\n## Test Plan\\n\\n<how to verify>\\n\\nImplements: <parent-issue-id>\" \\\n  --base main \\\n  --head feature/<issue-id>-<slug>\n```\n\n4. PR body must include:\n   - Summary of changes\n   - Test plan\n   - Reference to the parent issue\n   - Link to the design spec path\n\nDo NOT merge — just open the PR and output 'done'.",
   "outputSchema": {
     "type": "object",
     "properties": {

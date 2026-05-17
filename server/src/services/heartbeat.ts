@@ -2426,6 +2426,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         status: issues.status,
         workMode: issues.workMode,
         priority: issues.priority,
+        parentId: issues.parentId,
         projectId: issues.projectId,
         projectWorkspaceId: issues.projectWorkspaceId,
         executionWorkspaceId: issues.executionWorkspaceId,
@@ -6907,6 +6908,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           priority: issueContext.priority,
           workMode: issueContext.workMode,
           description: issueContext.description,
+          parentId: issueContext.parentId,
           projectId: issueContext.projectId,
           projectWorkspaceId: issueContext.projectWorkspaceId,
           executionWorkspaceId: issueContext.executionWorkspaceId,
@@ -6984,8 +6986,24 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     } else {
       delete context.paperclipTaskMarkdown;
     }
+    let resolvedExecutionWorkspaceId = issueRef?.executionWorkspaceId ?? null;
+    // Deferred inheritance: if reuse_existing but no workspace ID yet, look up parent's workspace
+    if (
+      !resolvedExecutionWorkspaceId &&
+      issueRef?.executionWorkspacePreference === "reuse_existing" &&
+      issueRef.parentId
+    ) {
+      const parentIssue = await db
+        .select({ executionWorkspaceId: issues.executionWorkspaceId })
+        .from(issues)
+        .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
+        .then((rows) => rows[0] ?? null);
+      if (parentIssue?.executionWorkspaceId) {
+        resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
+      }
+    }
     const existingExecutionWorkspace =
-      issueRef?.executionWorkspaceId ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId) : null;
+      resolvedExecutionWorkspaceId ? await executionWorkspacesSvc.getById(resolvedExecutionWorkspaceId) : null;
     const shouldReuseExisting =
       issueRef?.executionWorkspacePreference === "reuse_existing" &&
       existingExecutionWorkspace !== null &&
