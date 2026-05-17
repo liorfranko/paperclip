@@ -198,6 +198,20 @@ export async function advancePipeline(
           await stateMachine.updateStageStatus(stageRow.id, "completed");
           ctx.logger.info("Fixed fanout auto-completed", { runId, stageId: stageDef.id, tracks: fixedOutput.tracks });
           ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: stageDef.id, status: "completed" });
+
+          const expansionPlan = router.detectDynamicExpansion(pipeline, stageDef.id, fixedOutput);
+          if (expansionPlan) {
+            const expandedPipeline = router.expandPipeline(pipeline, expansionPlan);
+            const existingStageIds = new Set(currentRows.map((r) => r.stageId));
+            for (const newStage of expandedPipeline.stages) {
+              if (!existingStageIds.has(newStage.id)) {
+                await stateMachine.createStage({ id: randomUUID(), pipelineRunId: runId, stageId: newStage.id });
+              }
+            }
+            await stateMachine.updatePipelineYaml(runId, JSON.stringify(expandedPipeline));
+            pipeline = expandedPipeline;
+          }
+
           hasAutoCompleted = true;
           continue;
         }

@@ -388,6 +388,13 @@ export class StateMachine {
     }));
   }
 
+  async updatePipelineYaml(runId: string, pipelineJson: string): Promise<void> {
+    await this.db.execute(
+      `UPDATE ${this.table("pipeline_runs")} SET pipeline_yaml = $1, updated_at = NOW() WHERE id = $2`,
+      [pipelineJson, runId],
+    );
+  }
+
   async cancelRun(runId: string): Promise<void> {
     // Set run status to cancelled
     await this.db.execute(

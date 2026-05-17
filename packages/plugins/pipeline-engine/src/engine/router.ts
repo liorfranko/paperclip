@@ -2,12 +2,17 @@ import { getActionById } from "../actions/index.js";
 import { getIncomingEdges, getErrorEdges, getRootStageIds } from "./edge-utils.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "../types.js";
 
+export interface ExpansionPlan {
+  templateEdges: EdgeDefinition[];
+  tracks: string[];
+}
+
 export class Router {
-  async getReadyStages(
+  getReadyStages(
     pipeline: PipelineDefinition,
     stageRows: PipelineStage[],
     loopEdgeCounts?: Record<string, number>,
-  ): Promise<StageDefinition[]> {
+  ): StageDefinition[] {
     const stageStatusMap = new Map(stageRows.map((s) => [s.stageId, s]));
     const ready: StageDefinition[] = [];
     const edges = pipeline.edges ?? [];
@@ -256,6 +261,147 @@ export class Router {
     }
 
     return { action: "goto", targetStageId: errorEdges[0].to };
+  }
+
+  detectDynamicExpansion(
+    pipeline: PipelineDefinition,
+    stageId: string,
+    output: Record<string, unknown>,
+  ): ExpansionPlan | null {
+    const templateEdges = pipeline.edges.filter(
+      (e) => e.from === stageId && e.template === true,
+    );
+    if (templateEdges.length === 0) return null;
+
+    const tracks = output.tracks;
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+
+    return { templateEdges, tracks: tracks as string[] };
+  }
+
+  expandPipeline(pipeline: PipelineDefinition, plan: ExpansionPlan): PipelineDefinition {
+    const { templateEdges, tracks } = plan;
+
+    // Collect all template stage IDs reachable from template edges
+    const templateStageIds = new Set<string>();
+    const templateEdgeIds = new Set(templateEdges.map((e) => e.id));
+
+    // Walk the chain: starting from each template edge target, follow edges between template stages
+    for (const te of templateEdges) {
+      let current = te.to;
+      while (current) {
+        const stageDef = pipeline.stages.find((s) => s.id === current);
+        if (!stageDef || !(stageDef as any).template) break;
+        templateStageIds.add(current);
+        // Find next edge in the chain (non-template edge from a template stage to another template stage)
+        const nextEdge = pipeline.edges.find((e) => {
+          if (e.from !== current || e.template) return false;
+          const target = pipeline.stages.find((s) => s.id === e.to);
+          return target && (target as any).template === true;
+        });
+        current = nextEdge ? nextEdge.to : "";
+      }
+    }
+
+    // Collect edges between template stages (chain edges) — these get removed too
+    const chainEdgeIds = new Set<string>();
+    for (const edge of pipeline.edges) {
+      if (templateStageIds.has(edge.from) && templateStageIds.has(edge.to)) {
+        chainEdgeIds.add(edge.id);
+      }
+    }
+
+    // For each template stage, find what non-template stage it points to (the downstream target)
+    // This is the edge from template stage → non-template stage (e.g. → fan_in)
+    const templateToDownstream = new Map<string, string>();
+    for (const edge of pipeline.edges) {
+      if (templateStageIds.has(edge.from) && !templateStageIds.has(edge.to) && !edge.template) {
+        templateToDownstream.set(edge.from, edge.to);
+        chainEdgeIds.add(edge.id);
+      }
+    }
+
+    // Find the "last" template stage in the chain (the one that connects to downstream)
+    // and the "first" template stage in the chain (pointed to by template edges from fan_out)
+    const firstTemplateStageIds = new Set(templateEdges.map((e) => e.to));
+
+    // Sanitize a track name for use in stage IDs
+    const sanitize = (name: string) => name.replace(/[\/\s]/g, "-");
+
+    const newStages: StageDefinition[] = [];
+    const newEdges: EdgeDefinition[] = [];
+
+    for (const track of tracks) {
+      const safeTrack = sanitize(track);
+
+      // Walk the template chain for this track
+      let currentTemplateId = templateEdges[0].to; // start from first template stage
+      let prevDynId: string | null = null;
+
+      while (currentTemplateId) {
+        const templateStage = pipeline.stages.find((s) => s.id === currentTemplateId);
+        if (!templateStage || !(templateStage as any).template) break;
+
+        const dynId = `dyn:${currentTemplateId}:${safeTrack}`;
+        const { template: _t, ...stageProps } = templateStage as any;
+        newStages.push({ ...stageProps, id: dynId, trackName: track } as StageDefinition);
+
+        if (prevDynId === null) {
+          // Connect fan_out → first dynamic stage (one edge per template edge per track)
+          for (const te of templateEdges) {
+            if (te.to === currentTemplateId) {
+              newEdges.push({
+                id: `dyn-edge-${te.from}-${dynId}`,
+                from: te.from,
+                to: dynId,
+              });
+            }
+          }
+        } else {
+          // Connect previous dynamic stage → this dynamic stage
+          newEdges.push({
+            id: `dyn-edge-${prevDynId}-${dynId}`,
+            from: prevDynId,
+            to: dynId,
+          });
+        }
+
+        prevDynId = dynId;
+
+        // Advance to next template stage in chain
+        const nextChainEdge = pipeline.edges.find((e) => {
+          if (e.from !== currentTemplateId || e.template) return false;
+          const target = pipeline.stages.find((s) => s.id === e.to);
+          return target && (target as any).template === true;
+        });
+
+        if (nextChainEdge) {
+          currentTemplateId = nextChainEdge.to;
+        } else {
+          // Last in chain — connect to downstream
+          const downstream = templateToDownstream.get(currentTemplateId);
+          if (downstream && prevDynId) {
+            newEdges.push({
+              id: `dyn-edge-${prevDynId}-${downstream}-${safeTrack}`,
+              from: prevDynId,
+              to: downstream,
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    const filteredStages = pipeline.stages.filter((s) => !templateStageIds.has(s.id));
+    const filteredEdges = pipeline.edges.filter(
+      (e) => !templateEdgeIds.has(e.id) && !chainEdgeIds.has(e.id),
+    );
+
+    return {
+      ...pipeline,
+      stages: [...filteredStages, ...newStages],
+      edges: [...filteredEdges, ...newEdges],
+    };
   }
 
   getFixedFanoutOutput(stageDef: StageDefinition): Record<string, unknown> | null {

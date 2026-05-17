@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { PluginContext, PluginEvent } from "@paperclipai/plugin-sdk";
 import { getActionById } from "../actions/index.js";
 import { extractOutput, validateOutput } from "../shared/output-parser.js";
@@ -149,6 +150,24 @@ export async function handleCommentEvent(
     await stateMachine.updateRunStatus(stageRow.pipelineRunId, "escalated");
     ctx.streams.emit(STREAM_RUN_PROGRESS, { runId: run.id, stageId: stageRow.stageId, status: "escalated" });
     return;
+  }
+
+  if (stageDef.type === "fan_out") {
+    const expansionPlan = router.detectDynamicExpansion(pipeline, stageDef.id, output);
+    if (expansionPlan) {
+      const expandedPipeline = router.expandPipeline(pipeline, expansionPlan);
+      const existingStageIds = new Set(
+        (await stateMachine.getRunStages(stageRow.pipelineRunId)).map((r) => r.stageId),
+      );
+      for (const newStage of expandedPipeline.stages) {
+        if (!existingStageIds.has(newStage.id)) {
+          await stateMachine.createStage({ id: randomUUID(), pipelineRunId: stageRow.pipelineRunId, stageId: newStage.id });
+        }
+      }
+      await stateMachine.updatePipelineYaml(stageRow.pipelineRunId, JSON.stringify(expandedPipeline));
+      await advancePipelineFn(ctx, stageRow.pipelineRunId, expandedPipeline, run.companyId);
+      return;
+    }
   }
 
   if (stageDef.checkpoint) {
