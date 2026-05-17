@@ -166,12 +166,11 @@ export async function handleCommentEvent(
       }
     }
   } catch (err) {
-    ctx.logger.warn("Failed to clean recovery issues on stage completion (non-fatal)", {
+    ctx.logger.error("Failed to clean recovery issues on stage completion — orphaned recovery issues may block pipeline", {
       issueId,
-      error: String(err),
+      error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
     });
   }
-
 
   if (isBlockingDecision(output)) {
     ctx.logger.warn("Stage output contains blocking decision — escalating to human", {
