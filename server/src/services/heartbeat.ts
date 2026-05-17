@@ -6988,6 +6988,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     }
     let resolvedExecutionWorkspaceId = issueRef?.executionWorkspaceId ?? null;
     let parentIdentifier: string | null = null;
+    let parentTitle: string | null = null;
     // Deferred inheritance: if reuse_existing but no workspace ID yet, look up parent's workspace
     if (
       !resolvedExecutionWorkspaceId &&
@@ -6995,7 +6996,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       issueRef.parentId
     ) {
       const parentIssue = await db
-        .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier })
+        .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier, title: issues.title })
         .from(issues)
         .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
         .then((rows) => rows[0] ?? null);
@@ -7004,6 +7005,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       }
       if (parentIssue?.identifier) {
         parentIdentifier = parentIssue.identifier;
+        parentTitle = parentIssue.title;
       }
     }
     const existingExecutionWorkspace =
@@ -7134,10 +7136,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           workspace: existingExecutionWorkspace,
         })
       : null;
+    const workspaceIssueRef = parentIdentifier
+      ? { id: issueRef?.parentId ?? issueRef?.id ?? "", identifier: parentIdentifier, title: parentTitle }
+      : issueRef;
     const executionWorkspace = reusedExecutionWorkspace ?? await realizeExecutionWorkspace({
           base: executionWorkspaceBase,
           config: runtimeConfig,
-          issue: issueRef,
+          issue: workspaceIssueRef,
           agent: {
             id: agent.id,
             name: agent.name,
@@ -7183,7 +7188,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
                       ? "adapter_managed"
                       : "shared_workspace",
               strategyType: executionWorkspace.strategy === "git_worktree" ? "git_worktree" : "project_primary",
-              name: executionWorkspace.branchName ?? parentIdentifier ?? issueRef?.identifier ?? `workspace-${agent.id.slice(0, 8)}`,
+              name: executionWorkspace.branchName ?? issueRef?.identifier ?? `workspace-${agent.id.slice(0, 8)}`,
               status: "active",
               cwd: executionWorkspace.cwd,
               repoUrl: executionWorkspace.repoUrl,
