@@ -75,6 +75,15 @@ export function registerTriggers(ctx: PluginContext, deps: TriggerDeps): void {
   ctx.events.on("issue.created", async (event: PluginEvent) => {
     try {
       await handleRecoveryIssueCreated(ctx, event, deps.stateMachine);
+    } catch (err) {
+      ctx.logger.error("Unhandled error in recovery issue created handler", {
+        entityId: event.entityId,
+        companyId: event.companyId,
+        error: String(err),
+        stack: (err as Error).stack,
+      });
+    }
+    try {
       await handleIssueEvent(ctx, event, deps);
     } catch (err) {
       ctx.logger.error("Unhandled error in issue.created handler", {
@@ -89,8 +98,35 @@ export function registerTriggers(ctx: PluginContext, deps: TriggerDeps): void {
   ctx.events.on("issue.updated", async (event: PluginEvent) => {
     try {
       await handleStageReBlocked(ctx, event, deps.stateMachine);
+    } catch (err) {
+      ctx.logger.error("Unhandled error in stage re-blocked handler", {
+        entityId: event.entityId,
+        companyId: event.companyId,
+        error: String(err),
+        stack: (err as Error).stack,
+      });
+    }
+    try {
       await handlePipelineRootBlocked(ctx, event, deps.stateMachine);
+    } catch (err) {
+      ctx.logger.error("Unhandled error in pipeline root blocked handler", {
+        entityId: event.entityId,
+        companyId: event.companyId,
+        error: String(err),
+        stack: (err as Error).stack,
+      });
+    }
+    try {
       await handleIssueUnblock(ctx, event, deps);
+    } catch (err) {
+      ctx.logger.error("Unhandled error in issue unblock handler", {
+        entityId: event.entityId,
+        companyId: event.companyId,
+        error: String(err),
+        stack: (err as Error).stack,
+      });
+    }
+    try {
       await handleIssueEvent(ctx, event, deps);
     } catch (err) {
       ctx.logger.error("Unhandled error in issue.updated handler", {

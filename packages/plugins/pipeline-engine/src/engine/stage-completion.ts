@@ -140,33 +140,46 @@ export async function handleCommentEvent(
 
   await ctx.issues.update(issueId, { status: "done" }, event.companyId);
 
-  // Proactive cleanup: cancel any recovery issues that the liveness monitor may have
-  // created on this stage issue during the race window between agent completion and
-  // this status update. This prevents sub-issue status propagation from blocking the
-  // pipeline root.
   try {
     const recoveryIssues = await ctx.issues.list({
       companyId: event.companyId,
       originId: issueId,
       originKind: "stranded_issue_recovery",
     });
-    for (const recovery of recoveryIssues) {
-      if (recovery.status === "done" || recovery.status === "cancelled") continue;
-      ctx.logger.info("Proactively cancelling recovery issue on completed stage", {
-        recoveryIssueId: recovery.id,
-        recoveryIdentifier: recovery.identifier,
-        stageIssueId: issueId,
-      });
-      await ctx.issues.update(recovery.id, { status: "done" }, event.companyId);
-      // Remove blocker relation if it exists
-      const stageRelations = await ctx.issues.relations.get(issueId, event.companyId);
-      const isBlocking = stageRelations.blockedBy.some((b) => b.id === recovery.id);
-      if (isBlocking) {
-        await ctx.issues.relations.removeBlockers(issueId, [recovery.id], event.companyId);
+    const activeRecoveries = recoveryIssues.filter(
+      (r) => r.status !== "done" && r.status !== "cancelled",
+    );
+    if (activeRecoveries.length > 0) {
+      const closedIds: string[] = [];
+      for (const recovery of activeRecoveries) {
+        ctx.logger.info("Proactively cancelling recovery issue on completed stage", {
+          recoveryIssueId: recovery.id,
+          recoveryIdentifier: recovery.identifier,
+          stageIssueId: issueId,
+        });
+        try {
+          await ctx.issues.update(recovery.id, { status: "done" }, event.companyId);
+          closedIds.push(recovery.id);
+        } catch (err) {
+          ctx.logger.error("Failed to cancel recovery issue on stage completion", {
+            recoveryIssueId: recovery.id,
+            stageIssueId: issueId,
+            error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
+          });
+        }
+      }
+      if (closedIds.length > 0) {
+        const stageRelations = await ctx.issues.relations.get(issueId, event.companyId);
+        const blockingRecoveryIds = closedIds.filter(
+          (id) => stageRelations.blockedBy.some((b) => b.id === id),
+        );
+        if (blockingRecoveryIds.length > 0) {
+          await ctx.issues.relations.removeBlockers(issueId, blockingRecoveryIds, event.companyId);
+        }
       }
     }
   } catch (err) {
-    ctx.logger.error("Failed to clean recovery issues on stage completion — orphaned recovery issues may block pipeline", {
+    ctx.logger.error("Failed to clean recovery issues on stage completion", {
       issueId,
       error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
     });

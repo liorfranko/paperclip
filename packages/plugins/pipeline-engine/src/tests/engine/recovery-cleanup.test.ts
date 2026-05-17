@@ -147,7 +147,7 @@ describe("handleStageReBlocked", () => {
     expect(ctx.issues.update).not.toHaveBeenCalled();
   });
 
-  it("cancels non-pipeline blockers and restores stage to done", async () => {
+  it("cancels recovery blockers and restores stage to done", async () => {
     ctx.issues.get
       .mockResolvedValueOnce({ id: "issue-1", status: "blocked", originKind: "plugin:paperclipai.pipeline-engine:stage", identifier: "PAP-1" })
       .mockResolvedValueOnce({ id: "recovery-1", originKind: "stranded_issue_recovery" });
@@ -161,6 +161,19 @@ describe("handleStageReBlocked", () => {
     expect(ctx.issues.update).toHaveBeenCalledWith("issue-1", { status: "done" }, "company-1");
   });
 
+  it("does not close non-recovery, non-pipeline blockers", async () => {
+    ctx.issues.get
+      .mockResolvedValueOnce({ id: "issue-1", status: "blocked", originKind: "plugin:paperclipai.pipeline-engine:stage", identifier: "PAP-1" })
+      .mockResolvedValueOnce({ id: "manual-1", originKind: "user_created" });
+    sm.getStageBySubIssueId.mockResolvedValue({ status: "completed" });
+    ctx.issues.relations.get.mockResolvedValue({ blockedBy: [{ id: "manual-1" }] });
+
+    await handleStageReBlocked(ctx, event(), sm);
+
+    expect(ctx.issues.update).not.toHaveBeenCalled();
+    expect(ctx.issues.relations.removeBlockers).not.toHaveBeenCalled();
+  });
+
   it("treats deleted blockers as removable", async () => {
     ctx.issues.get
       .mockResolvedValueOnce({ id: "issue-1", status: "blocked", originKind: "plugin:paperclipai.pipeline-engine:stage", identifier: "PAP-1" })
@@ -171,6 +184,23 @@ describe("handleStageReBlocked", () => {
     await handleStageReBlocked(ctx, event(), sm);
 
     expect(ctx.issues.relations.removeBlockers).toHaveBeenCalledWith("issue-1", ["deleted-1"], "company-1");
+  });
+
+  it("only removes successfully closed blockers on partial failure", async () => {
+    ctx.issues.get
+      .mockResolvedValueOnce({ id: "issue-1", status: "blocked", originKind: "plugin:paperclipai.pipeline-engine:stage", identifier: "PAP-1" })
+      .mockResolvedValueOnce({ id: "recovery-1", originKind: "stranded_issue_recovery" })
+      .mockResolvedValueOnce({ id: "recovery-2", originKind: "stranded_issue_recovery" });
+    sm.getStageBySubIssueId.mockResolvedValue({ status: "completed" });
+    ctx.issues.relations.get.mockResolvedValue({ blockedBy: [{ id: "recovery-1" }, { id: "recovery-2" }] });
+    ctx.issues.update
+      .mockResolvedValueOnce(undefined) // recovery-1 succeeds
+      .mockRejectedValueOnce(new Error("timeout")); // recovery-2 fails
+
+    await handleStageReBlocked(ctx, event(), sm);
+
+    expect(ctx.issues.relations.removeBlockers).toHaveBeenCalledWith("issue-1", ["recovery-1"], "company-1");
+    expect(ctx.issues.update).not.toHaveBeenCalledWith("issue-1", { status: "done" }, "company-1");
   });
 
   it("logs error and does not throw on API failure", async () => {

@@ -1,7 +1,9 @@
 import type { PluginContext, PluginEvent } from "@paperclipai/plugin-sdk";
 import type { StateMachine } from "./state-machine.js";
+import type { PipelineRun } from "../types.js";
 
 const PIPELINE_ORIGIN_PREFIX = "plugin:paperclipai.pipeline-engine";
+const RECOVERY_ORIGIN_KIND = "stranded_issue_recovery";
 
 function formatError(err: unknown): object | string {
   if (err instanceof Error) return { message: err.message, stack: err.stack };
@@ -18,11 +20,15 @@ export async function handleRecoveryIssueCreated(
 
   try {
     const issue = await ctx.issues.get(issueId, event.companyId);
-    if (!issue || !issue.parentId) return;
+    if (!issue) {
+      ctx.logger.warn("Recovery cleanup: issue not found for just-created event", { issueId, companyId: event.companyId });
+      return;
+    }
+    if (!issue.parentId) return;
 
     const isRecoveryIssue =
       event.actorType === "system" ||
-      issue.originKind === "stranded_issue_recovery";
+      issue.originKind === RECOVERY_ORIGIN_KIND;
     if (!isRecoveryIssue) return;
 
     const parent = await ctx.issues.get(issue.parentId, event.companyId);
@@ -100,25 +106,31 @@ export async function handleStageReBlocked(
     if (relations.blockedBy.length === 0) return;
 
     const blockerIds = relations.blockedBy.map((b) => b.id);
-    const nonPipelineBlockers: string[] = [];
+    const recoveryBlockerIds: string[] = [];
 
     for (const blockerId of blockerIds) {
       const blocker = await ctx.issues.get(blockerId, event.companyId);
       if (!blocker) {
-        nonPipelineBlockers.push(blockerId);
+        recoveryBlockerIds.push(blockerId);
         continue;
       }
 
-      const isBlockerPipeline = blocker.originKind?.startsWith(PIPELINE_ORIGIN_PREFIX);
-      if (isBlockerPipeline) {
+      if (blocker.originKind?.startsWith(PIPELINE_ORIGIN_PREFIX)) {
         return;
       }
-      nonPipelineBlockers.push(blockerId);
+
+      if (blocker.originKind === RECOVERY_ORIGIN_KIND) {
+        recoveryBlockerIds.push(blockerId);
+      }
     }
 
-    for (const blockerId of nonPipelineBlockers) {
+    if (recoveryBlockerIds.length === 0) return;
+
+    const successfullyClosed: string[] = [];
+    for (const blockerId of recoveryBlockerIds) {
       try {
         await ctx.issues.update(blockerId, { status: "done" }, event.companyId);
+        successfullyClosed.push(blockerId);
         ctx.logger.info("Cancelled recovery blocker on completed pipeline stage", {
           recoveryIssueId: blockerId,
           stageIssueId: issueId,
@@ -132,13 +144,27 @@ export async function handleStageReBlocked(
       }
     }
 
-    await ctx.issues.relations.removeBlockers(issueId, nonPipelineBlockers, event.companyId);
-    await ctx.issues.update(issueId, { status: "done" }, event.companyId);
-    ctx.logger.info("Restored completed pipeline stage to done status", {
-      issueId,
-      identifier: issue.identifier,
-      removedBlockers: nonPipelineBlockers.length,
-    });
+    if (successfullyClosed.length === 0) return;
+
+    try {
+      await ctx.issues.relations.removeBlockers(issueId, successfullyClosed, event.companyId);
+    } catch (err) {
+      ctx.logger.error("Failed to remove blocker relations after cancelling recovery issues", {
+        stageIssueId: issueId,
+        blockerIds: successfullyClosed,
+        error: formatError(err),
+      });
+      return;
+    }
+
+    if (successfullyClosed.length === recoveryBlockerIds.length) {
+      await ctx.issues.update(issueId, { status: "done" }, event.companyId);
+      ctx.logger.info("Restored completed pipeline stage to done status", {
+        issueId,
+        identifier: issue.identifier,
+        removedBlockers: successfullyClosed.length,
+      });
+    }
   } catch (err) {
     ctx.logger.error("Recovery cleanup failed in handleStageReBlocked", {
       issueId,
@@ -173,7 +199,7 @@ export async function handlePipelineRootBlocked(
         const blockerIssue = await ctx.issues.get(blocker.id, event.companyId);
         if (!blockerIssue) continue;
 
-        if (blockerIssue.originKind !== "stranded_issue_recovery") continue;
+        if (blockerIssue.originKind !== RECOVERY_ORIGIN_KIND) continue;
         if (!blockerIssue.parentId) continue;
 
         const stageRow = await stateMachine.getStageBySubIssueId(blockerIssue.parentId);
@@ -190,9 +216,11 @@ export async function handlePipelineRootBlocked(
           totalBlockers: relations.blockedBy.length,
         });
 
+        const successfullyClosed: string[] = [];
         for (const blockerId of removableBlockerIds) {
           try {
             await ctx.issues.update(blockerId, { status: "done" }, event.companyId);
+            successfullyClosed.push(blockerId);
           } catch (err) {
             ctx.logger.error("Failed to cancel recovery blocker on root", {
               recoveryIssueId: blockerId,
@@ -201,21 +229,33 @@ export async function handlePipelineRootBlocked(
             });
           }
         }
-        await ctx.issues.relations.removeBlockers(issueId, removableBlockerIds, event.companyId);
 
-        if (removableBlockerIds.length === relations.blockedBy.length) {
-          await ctx.issues.update(issueId, { status: "in_progress" }, event.companyId);
-          ctx.logger.info("Restored pipeline root issue from blocked to in_progress", {
-            issueId,
-            identifier: issue.identifier,
-          });
+        if (successfullyClosed.length > 0) {
+          try {
+            await ctx.issues.relations.removeBlockers(issueId, successfullyClosed, event.companyId);
+          } catch (err) {
+            ctx.logger.error("Failed to remove blocker relations from pipeline root", {
+              rootIssueId: issueId,
+              blockerIds: successfullyClosed,
+              error: formatError(err),
+            });
+            return;
+          }
+
+          if (successfullyClosed.length === relations.blockedBy.length) {
+            await ctx.issues.update(issueId, { status: "in_progress" }, event.companyId);
+            ctx.logger.info("Restored pipeline root issue from blocked to in_progress", {
+              issueId,
+              identifier: issue.identifier,
+            });
+          }
         }
         return;
       }
     }
 
     // Strategy 2: Sub-issue status propagation
-    await cleanOrphanedRecoveryIssues(ctx, issueId, event.companyId, stateMachine);
+    await cleanOrphanedRecoveryIssues(ctx, issueId, event.companyId, stateMachine, run);
   } catch (err) {
     ctx.logger.error("Recovery cleanup failed in handlePipelineRootBlocked", {
       issueId,
@@ -230,10 +270,8 @@ async function cleanOrphanedRecoveryIssues(
   rootIssueId: string,
   companyId: string,
   stateMachine: StateMachine,
+  run: PipelineRun,
 ): Promise<void> {
-  const run = await stateMachine.getAnyRunForIssue(rootIssueId, companyId);
-  if (!run) return;
-
   const stages = await stateMachine.getRunStages(run.id);
   const completedStageSubIssueIds = stages
     .filter((s) => s.status === "completed" && s.subIssueId)
@@ -246,7 +284,7 @@ async function cleanOrphanedRecoveryIssues(
     const recoveryIssues = await ctx.issues.list({
       companyId,
       originId: stageSubIssueId,
-      originKind: "stranded_issue_recovery",
+      originKind: RECOVERY_ORIGIN_KIND,
     });
     if (!recoveryIssues || recoveryIssues.length === 0) continue;
 
