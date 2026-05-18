@@ -226,9 +226,21 @@ describe("scenario-validator failure paths", () => {
       expect(beLoopEdges).toHaveLength(0);
     });
 
-    it("escalate-validation gets skipped when decision doesn't match its sourceHandle", async () => {
+    it("escalate-validation IS skipped when loop sourceHandle doesn't match source output (loop won't fire)", async () => {
       const stages = completedWithUnknownDecision();
       const skipped = await router.getSkippedStages(validatorPipeline, stages, {});
+      const skippedIds = skipped.map((s) => s.id);
+      // Loop sourceHandles are "not-valid-frontend"/"not-valid-backend" but output is "unknown-value"
+      // The loop won't fire, so escalate-validation should be skipped
+      expect(skippedIds).toContain("escalate-validation");
+    });
+
+    it("escalate-validation IS skipped when loops are exhausted and decision doesn't match", async () => {
+      const stages = completedWithUnknownDecision();
+      const skipped = await router.getSkippedStages(validatorPipeline, stages, {
+        "e-validator-fix-frontend": 2,
+        "e-validator-fix-backend": 2,
+      });
       const skippedIds = skipped.map((s) => s.id);
       expect(skippedIds).toContain("escalate-validation");
     });

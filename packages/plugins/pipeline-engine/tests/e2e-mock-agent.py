@@ -1,68 +1,232 @@
 #!/usr/bin/env python3
 """
-E2E Test: Pipeline Engine — Mock Agent approach
+E2E Test CLI: Pipeline Engine — Mock Agent
 
 Exercises the full pipeline lifecycle via HTTP APIs without any real LLM calls.
-A "mock agent" simulates completion by posting structured comments with the
-pipeline-output sentinel.
-
-Prerequisites:
-  - Paperclip server running at localhost:3100
-  - Pipeline engine plugin installed and status=ready
-  - "Internal Developer Portal" company with pipe-backend agent
+A "mock agent" simulates stage completion by posting structured comments with
+the pipeline-output sentinel, using realistic outputs matching each action's schema.
 
 Usage:
-  python3 tests/e2e-mock-agent.py
+  python3 tests/e2e-mock-agent.py                          # Run all scenarios
+  python3 tests/e2e-mock-agent.py --scenario happy         # Run specific scenario
+  python3 tests/e2e-mock-agent.py --no-cleanup             # Leave artifacts in UI
+  python3 tests/e2e-mock-agent.py --cleanup-only           # Clean up previous run
+  python3 tests/e2e-mock-agent.py --list                   # List available scenarios
 """
 
+import argparse
 import json
 import sys
 import time
 import urllib.request
 import urllib.error
+from dataclasses import dataclass, field
 
 BASE = "http://localhost:3100/api"
 COMPANY_ID = "f3f8f577-efb7-4b18-9c8a-e70656a09d38"
 PLUGIN_ID = "bf3901a7-72e3-42ee-a10a-670997636614"
 OUTPUT_SENTINEL = "<!-- pipeline-output -->"
+PIPELINE_NAME = "autonomous-dev"
 
-# Agent IDs to pause during tests (prevent real agents from claiming dispatched issues)
-AGENTS_TO_PAUSE: list = []
+# ═══════════════════════════════════════════════════════════════════════════════
+# Realistic mock outputs for each action
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Tracking state for cleanup
-cleanup_issue_ids = []
-cleanup_pipeline_name = None
-run_id = None
+MOCK_OUTPUTS = {
+    "triage-feature": {
+        "decision": "feature",
+    },
+    "triage-bug": {
+        "decision": "bug",
+    },
+    "triage-fast-track": {
+        "decision": "fast-track",
+    },
+    "validate-scenario-yes": {
+        "decision": "yes",
+    },
+    "validate-scenario-no": {
+        "decision": "no",
+    },
+    "create-spec": {
+        "decision": "done",
+    },
+    "validate-spec-yes": {
+        "decision": "yes",
+    },
+    "validate-spec-no": {
+        "decision": "no",
+    },
+    "plan-tasks-both": {
+        "tracks": ["backend", "frontend"],
+        "ordering": "parallel",
+    },
+    "plan-tasks-backend-only": {
+        "tracks": ["backend"],
+        "ordering": "parallel",
+    },
+    "plan-tasks-frontend-only": {
+        "tracks": ["frontend"],
+        "ordering": "parallel",
+    },
+    "write-tests": {
+        "decision": "done",
+    },
+    "write-implementation": {
+        "decision": "done",
+    },
+    "de-slop-verify": {
+        "decision": "done",
+    },
+    "open-pr": {
+        "decision": "done",
+    },
+    "check-ci-pass": {
+        "tracks": ["pass"],
+        "ordering": "parallel",
+    },
+    "check-ci-fail-backend": {
+        "tracks": ["backend"],
+        "ordering": "parallel",
+    },
+    "check-ci-fail-both": {
+        "tracks": ["backend", "frontend"],
+        "ordering": "parallel",
+    },
+    "fix-ci": {
+        "decision": "done",
+    },
+    "dispatch-reviews-full": {
+        "tracks": [
+            "code-quality",
+            "error-handling",
+            "test-coverage",
+            "comment-quality",
+            "type-design",
+            "architecture",
+            "blind-validation",
+        ],
+        "ordering": "parallel",
+    },
+    "dispatch-reviews-minimal": {
+        "tracks": ["code-quality", "test-coverage"],
+        "ordering": "parallel",
+    },
+    "review-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Code quality looks good. No critical issues found.",
+    },
+    "review-code-quality-approved": {
+        "decision": "approved",
+        "findings": [
+            {
+                "severity": "minor",
+                "file": "src/services/feature.service.ts",
+                "line": 42,
+                "description": "Consider extracting magic number 30 into a named constant",
+                "suggestion": "const MAX_RETRY_ATTEMPTS = 30;",
+            }
+        ],
+        "summary": "Minor style suggestion, no blocking issues.",
+    },
+    "review-error-handling-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Error handling is comprehensive. All async operations have proper try/catch with typed errors.",
+    },
+    "review-test-coverage-approved": {
+        "decision": "approved",
+        "findings": [
+            {
+                "severity": "minor",
+                "file": "src/services/feature.service.test.ts",
+                "line": 88,
+                "description": "Edge case for empty array input not tested",
+                "suggestion": "Add test: it('handles empty items array gracefully')",
+            }
+        ],
+        "summary": "Good coverage overall. One minor gap noted but non-blocking.",
+    },
+    "review-comments-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Comments are minimal and appropriate. No stale or misleading documentation.",
+    },
+    "review-type-design-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Type design is sound. Good use of discriminated unions and branded types.",
+    },
+    "review-architecture-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Architecture follows existing patterns. No new abstractions introduced unnecessarily.",
+    },
+    "review-blind-validation-approved": {
+        "decision": "approved",
+        "findings": [],
+        "summary": "Blind validation passed. Feature behavior matches scenario expectations.",
+    },
+    "review-needs-revision": {
+        "decision": "needs_revision",
+        "findings": [
+            {
+                "severity": "critical",
+                "file": "src/services/payment.service.ts",
+                "line": 127,
+                "description": "SQL injection vulnerability: user input interpolated directly into query string",
+                "suggestion": "Use parameterized query: db.query('SELECT * FROM orders WHERE id = $1', [orderId])",
+            },
+            {
+                "severity": "major",
+                "file": "src/controllers/order.controller.ts",
+                "line": 45,
+                "description": "Missing authentication check — endpoint accessible without valid session",
+                "suggestion": "Add authMiddleware to route definition",
+            },
+        ],
+        "summary": "Critical security issues found. Must fix before merge.",
+    },
+    "evaluate-findings-pass": {
+        "decision": "pass",
+        "total_findings": 3,
+        "blocking_count": 0,
+        "revision_brief": "",
+    },
+    "evaluate-findings-fail": {
+        "decision": "fail-impl",
+        "total_findings": 5,
+        "blocking_count": 2,
+        "revision_brief": "Fix SQL injection in payment.service.ts:127 (use parameterized queries) and add auth middleware to order.controller.ts:45.",
+    },
+    "simplify-code": {
+        "decision": "done",
+    },
+    "simplify-code-no-changes": {
+        "decision": "no-changes",
+    },
+    "validate-scenario-result-valid": {
+        "decision": "valid",
+    },
+    "validate-scenario-result-not-valid-frontend": {
+        "decision": "not-valid-frontend",
+    },
+    "validate-scenario-result-not-valid-backend": {
+        "decision": "not-valid-backend",
+    },
+    "validate-scenario-result-not-valid": {
+        "decision": "not-valid",
+    },
+}
 
 
-class Colors:
-    RED = "\033[0;31m"
-    GREEN = "\033[0;32m"
-    YELLOW = "\033[1;33m"
-    CYAN = "\033[0;36m"
-    NC = "\033[0m"
-
-
-def log(msg):
-    print(f"{Colors.CYAN}[E2E]{Colors.NC} {msg}")
-
-
-def passed(msg):
-    print(f"{Colors.GREEN}[PASS]{Colors.NC} {msg}")
-
-
-def fail(msg):
-    print(f"{Colors.RED}[FAIL]{Colors.NC} {msg}")
-    cleanup()
-    sys.exit(1)
-
-
-def warn(msg):
-    print(f"{Colors.YELLOW}[WARN]{Colors.NC} {msg}")
+# ═══════════════════════════════════════════════════════════════════════════════
+# HTTP helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def api_get(path):
-    """GET request, returns parsed JSON."""
     url = f"{BASE}{path}"
     req = urllib.request.Request(url)
     try:
@@ -74,7 +238,6 @@ def api_get(path):
 
 
 def api_post(path, data=None):
-    """POST request with JSON body, returns parsed JSON."""
     url = f"{BASE}{path}"
     body = json.dumps(data).encode() if data else b""
     req = urllib.request.Request(url, data=body, method="POST")
@@ -88,19 +251,63 @@ def api_post(path, data=None):
 
 
 def api_delete(path):
-    """DELETE request."""
     url = f"{BASE}{path}"
     req = urllib.request.Request(url, method="DELETE")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read()) if resp.read() else {}
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
     except Exception:
         pass
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Console output
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class C:
+    RED = "\033[0;31m"
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    CYAN = "\033[0;36m"
+    DIM = "\033[2m"
+    BOLD = "\033[1m"
+    NC = "\033[0m"
+
+
+def log(msg):
+    print(f"{C.CYAN}[E2E]{C.NC} {msg}")
+
+
+def passed(msg):
+    print(f"{C.GREEN}  ✓ {msg}{C.NC}")
+
+
+def fail(msg):
+    print(f"{C.RED}  ✗ {msg}{C.NC}")
+    raise ScenarioFailed(msg)
+
+
+def warn(msg):
+    print(f"{C.YELLOW}  ⚠ {msg}{C.NC}")
+
+
+def step(num, msg):
+    print(f"\n{C.BOLD}  Step {num}: {msg}{C.NC}")
+
+
+class ScenarioFailed(Exception):
+    pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test infrastructure
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 def poll_until(description, check_fn, max_attempts=30, interval=2):
-    """Poll until check_fn returns a truthy value."""
-    log(f"Polling: {description} (max {max_attempts}x{interval}s)...")
+    log(f"  Polling: {description} (max {max_attempts}x{interval}s)...")
     for i in range(1, max_attempts + 1):
         try:
             result = check_fn()
@@ -112,50 +319,11 @@ def poll_until(description, check_fn, max_attempts=30, interval=2):
     fail(f"Timed out polling: {description}")
 
 
-def cleanup():
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
-    log("Cleaning up...")
-
-    # Cancel any active run
-    if run_id:
-        try:
-            api_post(
-                f"/plugins/{PLUGIN_ID}/actions/cancel-run",
-                {"params": {"runId": run_id}},
-            )
-        except Exception:
-            pass
-
-    # Delete e2e-test pipeline
-    if cleanup_pipeline_name:
-        try:
-            api_post(
-                f"/plugins/{PLUGIN_ID}/actions/delete-pipeline",
-                {"params": {"name": cleanup_pipeline_name}},
-            )
-            log(f"  Deleted pipeline: {cleanup_pipeline_name}")
-        except Exception:
-            pass
-
-    # Delete created issues (children first, then parent)
-    for iid in reversed(cleanup_issue_ids):
-        try:
-            api_delete(f"/issues/{iid}")
-        except Exception:
-            pass
-    if cleanup_issue_ids:
-        log(f"  Deleted {len(cleanup_issue_ids)} issue(s)")
-
-    log("Cleanup complete.")
-
-
 def get_child_issues(parent_id):
-    """Get sub-issues of a parent."""
-    return api_get(f"/companies/{COMPANY_ID}/issues?parentId={parent_id}&limit=20")
+    return api_get(f"/companies/{COMPANY_ID}/issues?parentId={parent_id}&limit=50")
 
 
 def find_stage_issue(parent_id, stage_name):
-    """Find a sub-issue matching [pipeline] <stage_name>."""
     issues = get_child_issues(parent_id)
     for issue in issues:
         if f"[pipeline] {stage_name}" in issue.get("title", ""):
@@ -163,531 +331,514 @@ def find_stage_issue(parent_id, stage_name):
     return None
 
 
-def run_scenario(name, fn):
-    """Run a test scenario with cleanup."""
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
-    cleanup_pipeline_name = None
-    cleanup_issue_ids = []
-    run_id = None
-    print()
-    print(f"{Colors.CYAN}{'═' * 60}{Colors.NC}")
-    print(f"{Colors.CYAN} SCENARIO: {name}{Colors.NC}")
-    print(f"{Colors.CYAN}{'═' * 60}{Colors.NC}")
-    try:
-        fn()
-        print(f"{Colors.GREEN} ✓ SCENARIO PASSED: {name}{Colors.NC}")
-        return True
-    except SystemExit:
-        print(f"{Colors.RED} ✗ SCENARIO FAILED: {name}{Colors.NC}")
-        return False
-    finally:
-        cleanup()
+def find_all_stage_issues(parent_id, stage_name):
+    issues = get_child_issues(parent_id)
+    matching = [i for i in issues if f"[pipeline] {stage_name}" in i.get("title", "")]
+    matching.sort(key=lambda x: x.get("createdAt", ""))
+    return matching
 
 
-# ===========================================================================
-# SCENARIO 1: Happy path (original test)
-# ===========================================================================
-def scenario_happy_path():
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
+def find_latest_stage_issue(parent_id, stage_name, known_ids=None):
+    """Find the most recently created stage issue, excluding known IDs."""
+    issues = find_all_stage_issues(parent_id, stage_name)
+    if known_ids:
+        issues = [i for i in issues if i["id"] not in known_ids]
+    return issues[-1] if issues else None
 
-    # =========================================================================
-    # Step 1: Save a minimal 2-stage pipeline (implement → validate)
-    # =========================================================================
-    log("Step 1: Save minimal e2e-test pipeline")
 
-    pipeline_def = {
-        "name": "e2e-test",
-        "description": "Minimal 2-stage E2E test pipeline",
-        "trigger": {"label": "pipeline:feature"},
-        "stages": [
-            {
-                "id": "implement",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "write-implementation",
-            },
-            {
-                "id": "validate",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "validate-scenario",
-            },
-        ],
-        "edges": [{"id": "e1", "from": "implement", "to": "validate"}],
-        "positions": {},
-    }
+def post_mock_output(issue_id, output_key_or_dict):
+    if isinstance(output_key_or_dict, str):
+        output = MOCK_OUTPUTS[output_key_or_dict]
+    else:
+        output = output_key_or_dict
 
-    save_result = api_post(
-        f"/plugins/{PLUGIN_ID}/actions/save-pipeline",
-        {"params": {"name": "e2e-test", "content": json.dumps(pipeline_def)}},
+    comment_body = f"""{OUTPUT_SENTINEL}
+```json
+{json.dumps(output, indent=2)}
+```"""
+
+    result = api_post(f"/issues/{issue_id}/comments", {"body": comment_body})
+    comment_id = result.get("id")
+    if not comment_id:
+        fail(f"Failed to post mock output on issue {issue_id}")
+    return comment_id
+
+
+def wait_for_stage(parent_id, stage_name, max_attempts=30, interval=2):
+    stage = poll_until(
+        f"stage '{stage_name}' dispatched",
+        lambda: find_stage_issue(parent_id, stage_name),
+        max_attempts=max_attempts,
+        interval=interval,
     )
-    if not save_result.get("data", {}).get("success"):
-        fail(f"save-pipeline failed: {save_result}")
-    cleanup_pipeline_name = "e2e-test"
-    passed("Pipeline 'e2e-test' saved")
+    return stage["id"]
 
-    # =========================================================================
-    # Step 2: Create a parent issue (no trigger label needed — we use trigger-run)
-    # =========================================================================
-    log("Step 2: Create parent issue")
 
+def complete_stage(parent_id, stage_name, output_key, max_attempts=30, interval=2):
+    stage_id = wait_for_stage(parent_id, stage_name, max_attempts, interval)
+    post_mock_output(stage_id, output_key)
+    passed(f"{stage_name} → {output_key}")
+    return stage_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent pause/resume
+# ═══════════════════════════════════════════════════════════════════════════════
+
+paused_agent_ids: list = []
+
+
+def pause_all_agents():
+    global paused_agent_ids
+    log("Pausing all agents to prevent interference...")
+    agents = api_get(f"/companies/{COMPANY_ID}/agents")
+    for agent in agents:
+        if agent.get("status") != "paused":
+            try:
+                api_post(f"/agents/{agent['id']}/pause", {})
+                paused_agent_ids.append(agent["id"])
+                log(f"  Paused: {agent['name']} ({agent['id'][:8]}...)")
+            except Exception as e:
+                warn(f"  Could not pause {agent['name']}: {e}")
+    passed(f"Paused {len(paused_agent_ids)} agent(s)")
+
+
+def resume_all_agents():
+    global paused_agent_ids
+    if not paused_agent_ids:
+        return
+    log("Resuming agents...")
+    for agent_id in paused_agent_ids:
+        try:
+            api_post(f"/agents/{agent_id}/resume", {})
+        except Exception:
+            pass
+    log(f"  Resumed {len(paused_agent_ids)} agent(s)")
+    paused_agent_ids = []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scenario state tracking
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class ScenarioState:
+    name: str
+    parent_issue_id: str | None = None
+    issue_ids: list = field(default_factory=list)
+    run_id: str | None = None
+    should_cleanup: bool = True
+
+    def track_issue(self, issue_id):
+        self.issue_ids.append(issue_id)
+
+    def cleanup(self):
+        if not self.should_cleanup:
+            log(
+                f"  Skipping cleanup (--no-cleanup). Parent issue: {self.parent_issue_id}"
+            )
+            return
+
+        # Cancel any active run
+        if self.run_id:
+            try:
+                api_post(
+                    f"/plugins/{PLUGIN_ID}/actions/cancel-run",
+                    {"params": {"runId": self.run_id}},
+                )
+            except Exception:
+                pass
+
+        # Delete issues (children first)
+        for iid in reversed(self.issue_ids):
+            try:
+                api_delete(f"/issues/{iid}")
+            except Exception:
+                pass
+
+        if self.issue_ids:
+            log(f"  Cleaned up {len(self.issue_ids)} issue(s)")
+
+
+def create_and_trigger(state: ScenarioState, title: str, pipeline_name=PIPELINE_NAME):
     issue_result = api_post(
         f"/companies/{COMPANY_ID}/issues",
         {
-            "title": "[E2E Test] Pipeline mock agent test",
-            "description": "Automated E2E test — mock agent completes stages via comments.",
+            "title": title,
+            "description": f"E2E test scenario: {state.name}\nAutomated mock-agent test run.",
             "status": "todo",
             "priority": "low",
         },
     )
-    parent_issue_id = issue_result.get("id")
-    if not parent_issue_id:
-        fail(f"Failed to create parent issue: {issue_result}")
-    cleanup_issue_ids.append(parent_issue_id)
-    log(f"  Parent issue: {parent_issue_id}")
-    passed("Parent issue created")
-
-    # =========================================================================
-    # Step 3: Trigger the pipeline run via action
-    # =========================================================================
-    log("Step 3: Trigger pipeline run via trigger-run action")
+    parent_id = issue_result["id"]
+    state.parent_issue_id = parent_id
+    state.track_issue(parent_id)
 
     trigger_result = api_post(
         f"/plugins/{PLUGIN_ID}/actions/trigger-run",
         {
             "params": {
                 "companyId": COMPANY_ID,
-                "issueId": parent_issue_id,
-                "pipelineName": "e2e-test",
+                "issueId": parent_id,
+                "pipelineName": pipeline_name,
             }
         },
     )
     if not trigger_result.get("data", {}).get("success"):
         fail(f"trigger-run failed: {trigger_result}")
-    passed("Pipeline run triggered")
 
-    # =========================================================================
-    # Step 4: Poll for stage 1 dispatch (implement)
-    # =========================================================================
-    log("Step 4: Wait for stage 'implement' to dispatch")
+    return parent_id
 
-    def check_stage1():
-        return find_stage_issue(parent_issue_id, "implement")
 
-    stage1 = poll_until(
-        "stage 'implement' sub-issue", check_stage1, max_attempts=25, interval=2
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Full feature happy path (autonomous-dev)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_full_feature_happy_path(state: ScenarioState):
+    """Complete feature flow: triage→scenario→spec→plan→impl→PR→CI→reviews→simplify→validate"""
+
+    step(1, "Create issue and trigger pipeline")
+    parent_id = create_and_trigger(
+        state, "[E2E] Full feature: Add user notification preferences API"
     )
-    stage1_issue_id = stage1["id"]
-    cleanup_issue_ids.append(stage1_issue_id)
-    log(f"  Stage 1 issue: {stage1_issue_id}")
-    passed("Pipeline run materialized, stage 'implement' dispatched")
+    log(f"  Parent issue: {parent_id}")
 
-    # =========================================================================
-    # Step 5: Mock agent posts completion comment on stage 1
-    # =========================================================================
-    log("Step 5: Post mock completion comment on stage 1 (implement)")
+    step(2, "Triage → feature")
+    complete_stage(parent_id, "triage", "triage-feature")
 
-    comment_body = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "done"}}
-```"""
+    step(3, "Validate scenario → yes")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
 
-    comment_result = api_post(
-        f"/issues/{stage1_issue_id}/comments",
-        {"body": comment_body},
-    )
-    comment_id = comment_result.get("id")
-    if not comment_id:
-        fail(f"Failed to post comment on stage 1: {comment_result}")
-    log(f"  Comment posted: {comment_id}")
-    passed("Mock agent completed stage 'implement'")
+    step(4, "Create spec → done")
+    complete_stage(parent_id, "create-spec", "create-spec")
 
-    # =========================================================================
-    # Step 6: Poll for stage 2 dispatch (validate)
-    # =========================================================================
-    log("Step 6: Wait for stage 'validate' to dispatch")
+    step(5, "Validate spec → yes")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
 
-    def check_stage2():
-        return find_stage_issue(parent_issue_id, "validate")
+    step(6, "Plan tasks → backend + frontend")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-both")
 
-    stage2 = poll_until(
-        "stage 'validate' sub-issue", check_stage2, max_attempts=25, interval=2
-    )
-    stage2_issue_id = stage2["id"]
-    cleanup_issue_ids.append(stage2_issue_id)
-    log(f"  Stage 2 issue: {stage2_issue_id}")
-    passed("Stage 'validate' dispatched after 'implement' completed")
+    step(7, "Backend track: tests → impl → de-slop")
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
 
-    # =========================================================================
-    # Step 7: Mock agent posts completion comment on stage 2
-    # =========================================================================
-    log("Step 7: Post mock completion comment on stage 2 (validate)")
+    step(8, "Frontend track: tests → impl → de-slop")
+    complete_stage(parent_id, "write-frontend-tests", "write-tests")
+    complete_stage(parent_id, "write-frontend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-frontend", "de-slop-verify")
 
-    comment_body2 = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "yes"}}
-```"""
+    step(9, "Open PR → done")
+    complete_stage(parent_id, "open-pr", "open-pr")
 
-    comment_result2 = api_post(
-        f"/issues/{stage2_issue_id}/comments",
-        {"body": comment_body2},
-    )
-    comment_id2 = comment_result2.get("id")
-    if not comment_id2:
-        fail(f"Failed to post comment on stage 2: {comment_result2}")
-    log(f"  Comment posted: {comment_id2}")
-    passed("Mock agent completed stage 'validate'")
+    step(10, "Check CI → pass")
+    complete_stage(parent_id, "check-ci", "check-ci-pass")
 
-    # =========================================================================
-    # Step 8: Verify pipeline run completed (parent issue → done)
-    # =========================================================================
-    log("Step 8: Verify pipeline run completed")
+    step(11, "Dispatch reviews (full)")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-full")
 
-    def check_parent_done():
-        issue = api_get(f"/issues/{parent_issue_id}")
-        if issue.get("status") == "done":
-            return "done"
-        return None
+    step(12, "Complete all 7 reviews → approved")
+    review_stages = [
+        "review-code-quality",
+        "review-error-handling",
+        "review-test-coverage",
+        "review-comments",
+        "review-type-design",
+        "review-architecture",
+        "review-blind-validation",
+    ]
+    for review_name in review_stages:
+        complete_stage(parent_id, review_name, "review-approved")
 
+    step(13, "Evaluate findings → pass")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-pass")
+
+    step(14, "Simplify code → done")
+    complete_stage(parent_id, "simplify-code", "simplify-code")
+
+    step(15, "Scenario validator → valid")
+    complete_stage(parent_id, "scenario-validator", "validate-scenario-result-valid")
+
+    step(16, "Verify pipeline completed")
     final_status = poll_until(
-        "parent issue marked done", check_parent_done, max_attempts=20, interval=2
-    )
-    if final_status != "done":
-        fail(f"Parent issue not done (status={final_status})")
-    passed("Parent issue marked done — pipeline completed successfully!")
-
-    # =========================================================================
-    # Step 9: Verify stage sub-issues are done
-    # =========================================================================
-    log("Step 9: Verify all stage sub-issues are done")
-
-    for sid, name in [(stage1_issue_id, "implement"), (stage2_issue_id, "validate")]:
-        issue = api_get(f"/issues/{sid}")
-        if issue.get("status") != "done":
-            fail(f"Sub-issue {name} ({sid}) not done (status={issue.get('status')})")
-    passed("All stage sub-issues marked done")
-
-    # =========================================================================
-    # Summary
-    # =========================================================================
-    passed(f"Full pipeline lifecycle: {parent_issue_id}")
-
-
-# ===========================================================================
-# SCENARIO 2: Invalid output format (malformed comment)
-# ===========================================================================
-def scenario_invalid_output():
-    """Test: agent posts comment WITHOUT the sentinel — pipeline should NOT advance."""
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
-
-    log("Save pipeline")
-    pipeline_def = {
-        "name": "e2e-invalid-output",
-        "description": "Test invalid output handling",
-        "trigger": {"label": "pipeline:feature"},
-        "stages": [
-            {
-                "id": "step1",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "write-implementation",
-            },
-        ],
-        "edges": [],
-        "positions": {},
-    }
-    save_result = api_post(
-        f"/plugins/{PLUGIN_ID}/actions/save-pipeline",
-        {"params": {"name": "e2e-invalid-output", "content": json.dumps(pipeline_def)}},
-    )
-    if not save_result.get("data", {}).get("success"):
-        fail(f"save-pipeline failed: {save_result}")
-    cleanup_pipeline_name = "e2e-invalid-output"
-
-    log("Create parent issue + trigger")
-    issue_result = api_post(
-        f"/companies/{COMPANY_ID}/issues",
-        {
-            "title": "[E2E] Invalid output test",
-            "description": "Testing malformed output",
-            "status": "todo",
-            "priority": "low",
-        },
-    )
-    parent_id = issue_result["id"]
-    cleanup_issue_ids.append(parent_id)
-
-    api_post(
-        f"/plugins/{PLUGIN_ID}/actions/trigger-run",
-        {
-            "params": {
-                "companyId": COMPANY_ID,
-                "issueId": parent_id,
-                "pipelineName": "e2e-invalid-output",
-            }
-        },
-    )
-
-    log("Wait for stage dispatch")
-    stage = poll_until(
-        "stage dispatch",
-        lambda: find_stage_issue(parent_id, "step1"),
+        "parent issue marked done",
+        lambda: api_get(f"/issues/{parent_id}").get("status") == "done" or None,
         max_attempts=20,
         interval=2,
     )
-    stage_id = stage["id"]
-    cleanup_issue_ids.append(stage_id)
+    passed("Pipeline completed — parent issue marked done")
 
-    # Post a comment WITHOUT the sentinel — should be ignored
-    log("Post comment WITHOUT sentinel (should be ignored)")
-    api_post(
-        f"/issues/{stage_id}/comments",
-        {"body": "Just a regular comment, no output here"},
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Feature with CI failure and retry
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_ci_failure_retry(state: ScenarioState):
+    """Feature flow where CI fails, gets fixed, then passes on retry"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(
+        state, "[E2E] CI retry: Fix broken build after implementation"
     )
+
+    step(2, "Triage → feature → scenario → spec → plan (backend only)")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-backend-only")
+
+    step(3, "Backend track: tests → impl → de-slop")
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
+
+    step(4, "Open PR → done")
+    complete_stage(parent_id, "open-pr", "open-pr")
+
+    step(5, "Check CI → FAIL backend (first attempt)")
+    first_ci_id = complete_stage(parent_id, "check-ci", "check-ci-fail-backend")
+
+    step(6, "Fix CI backend → done")
+    complete_stage(parent_id, "fix-ci-backend", "fix-ci")
+
+    step(7, "Check CI → pass (second attempt, after loop)")
+    # ci-fix-sync fan_in auto-completes, then outgoing loop resets check-ci
+    second_ci = poll_until(
+        "second check-ci dispatch",
+        lambda: find_latest_stage_issue(parent_id, "check-ci", known_ids={first_ci_id}),
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(second_ci["id"], "check-ci-pass")
+    passed("check-ci (attempt 2) → pass")
+
+    step(8, "Reviews → all approved → evaluate → simplify → validate")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-minimal")
+    complete_stage(parent_id, "review-code-quality", "review-approved")
+    complete_stage(parent_id, "review-test-coverage", "review-approved")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-pass")
+    complete_stage(parent_id, "simplify-code", "simplify-code")
+    complete_stage(parent_id, "scenario-validator", "validate-scenario-result-valid")
+
+    step(9, "Verify pipeline completed")
+    poll_until(
+        "parent done",
+        lambda: api_get(f"/issues/{parent_id}").get("status") == "done" or None,
+        max_attempts=20,
+        interval=2,
+    )
+    passed("Pipeline completed after CI retry loop")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Review findings loop back to implementation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_review_revision_loop(state: ScenarioState):
+    """Reviews find critical issues → loop back to write-backend-impl → re-review → pass"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(
+        state, "[E2E] Review loop: Critical findings trigger revision"
+    )
+
+    step(2, "Fast-path to reviews (triage→scenario→spec→plan→impl→PR→CI)")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-backend-only")
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
+    complete_stage(parent_id, "open-pr", "open-pr")
+    complete_stage(parent_id, "check-ci", "check-ci-pass")
+
+    step(3, "Dispatch reviews (minimal) → code-quality finds critical issue")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-minimal")
+    complete_stage(parent_id, "review-code-quality", "review-needs-revision")
+    complete_stage(parent_id, "review-test-coverage", "review-approved")
+
+    step(4, "Evaluate findings → fail-impl (loops back to write-backend-impl)")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-fail")
+
+    step(5, "Write backend impl (revision pass) → de-slop → PR → CI → reviews again")
+    # The loop goes back to write-backend-impl
     time.sleep(3)
-
-    # Post a comment WITH sentinel but invalid JSON — THIS WILL KILL THE PIPELINE
-    # BUG FOUND: A single malformed JSON comment permanently escalates the run
-    # when no error edges are defined. The pipeline cannot recover.
-    log("Post comment WITH sentinel but broken JSON (KNOWN BUG: kills pipeline)")
-    bad_json_body = f"""{OUTPUT_SENTINEL}
-```json
-{{this is not valid json
-```"""
-    api_post(f"/issues/{stage_id}/comments", {"body": bad_json_body})
-    time.sleep(3)
-
-    # The pipeline is now escalated — verify it's dead
-    parent = api_get(f"/issues/{parent_id}")
-    if parent.get("status") == "done":
-        fail("Parent issue should NOT be done after invalid output!")
-
-    passed("Invalid JSON with sentinel KILLED the pipeline (no error edges → escalate)")
-
-    # Post valid output — verify it does NOT recover (confirming the bug)
-    log("Post valid output AFTER escalation (expect no recovery)")
-    valid_body = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "done"}}
-```"""
-    api_post(f"/issues/{stage_id}/comments", {"body": valid_body})
-    time.sleep(3)
-
-    parent = api_get(f"/issues/{parent_id}")
-    if parent.get("status") == "done":
-        fail("Pipeline recovered from escalation — unexpected!")
-
-    passed(
-        "BUG CONFIRMED: Pipeline is permanently dead after malformed output (no retry without error edges)"
-    )
-
-
-# ===========================================================================
-# SCENARIO 3: Blocking decision (ci-blocked → escalated)
-# ===========================================================================
-def scenario_blocking_decision():
-    """Test: agent posts a blocking decision → pipeline escalates."""
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
-
-    log("Save pipeline")
-    pipeline_def = {
-        "name": "e2e-blocking",
-        "description": "Test blocking decision handling",
-        "trigger": {"label": "pipeline:feature"},
-        "stages": [
-            {
-                "id": "ci",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "check-ci",
-            },
-        ],
-        "edges": [],
-        "positions": {},
-    }
-    save_result = api_post(
-        f"/plugins/{PLUGIN_ID}/actions/save-pipeline",
-        {"params": {"name": "e2e-blocking", "content": json.dumps(pipeline_def)}},
-    )
-    if not save_result.get("data", {}).get("success"):
-        fail(f"save-pipeline failed: {save_result}")
-    cleanup_pipeline_name = "e2e-blocking"
-
-    log("Create parent issue + trigger")
-    issue_result = api_post(
-        f"/companies/{COMPANY_ID}/issues",
-        {
-            "title": "[E2E] Blocking decision test",
-            "description": "Test ci-blocked",
-            "status": "todo",
-            "priority": "low",
-        },
-    )
-    parent_id = issue_result["id"]
-    cleanup_issue_ids.append(parent_id)
-
-    api_post(
-        f"/plugins/{PLUGIN_ID}/actions/trigger-run",
-        {
-            "params": {
-                "companyId": COMPANY_ID,
-                "issueId": parent_id,
-                "pipelineName": "e2e-blocking",
-            }
-        },
-    )
-
-    log("Wait for stage dispatch")
-    stage = poll_until(
-        "stage dispatch",
-        lambda: find_stage_issue(parent_id, "ci"),
-        max_attempts=20,
-        interval=2,
-    )
-    stage_id = stage["id"]
-    cleanup_issue_ids.append(stage_id)
-
-    # Post a blocking decision
-    log("Post blocking decision (ci-blocked)")
-    blocking_body = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "ci-blocked", "tracks": ["backend"]}}
-```"""
-    api_post(f"/issues/{stage_id}/comments", {"body": blocking_body})
-    time.sleep(4)
-
-    # Verify stage sub-issue is marked blocked
-    stage_issue = api_get(f"/issues/{stage_id}")
-    if stage_issue.get("status") != "blocked":
-        warn(f"Expected stage issue to be 'blocked', got '{stage_issue.get('status')}'")
-
-    # Verify parent issue is NOT done (run should be escalated, not completed)
-    parent = api_get(f"/issues/{parent_id}")
-    if parent.get("status") == "done":
-        fail("Parent should NOT be done after blocking decision")
-
-    passed(
-        f"Blocking decision handled correctly — parent status: {parent.get('status')}"
-    )
-
-
-# ===========================================================================
-# SCENARIO 4: Conditional routing (sourceHandle-based branching)
-# ===========================================================================
-def scenario_conditional_routing():
-    """Test: 3-stage pipeline where stage 1's decision routes to different paths."""
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
-
-    log("Save pipeline with conditional branching")
-    pipeline_def = {
-        "name": "e2e-branching",
-        "description": "Test conditional routing via sourceHandle",
-        "trigger": {"label": "pipeline:feature"},
-        "stages": [
-            {
-                "id": "check",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "validate-scenario",
-            },
-            {
-                "id": "fix",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "fix-ci",
-            },
-            {
-                "id": "done-path",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "write-implementation",
-            },
-        ],
-        "edges": [
-            {"id": "e1", "from": "check", "to": "fix", "sourceHandle": "no"},
-            {"id": "e2", "from": "check", "to": "done-path", "sourceHandle": "yes"},
-        ],
-        "positions": {},
-    }
-    save_result = api_post(
-        f"/plugins/{PLUGIN_ID}/actions/save-pipeline",
-        {"params": {"name": "e2e-branching", "content": json.dumps(pipeline_def)}},
-    )
-    if not save_result.get("data", {}).get("success"):
-        fail(f"save-pipeline failed: {save_result}")
-    cleanup_pipeline_name = "e2e-branching"
-
-    log("Create parent issue + trigger")
-    issue_result = api_post(
-        f"/companies/{COMPANY_ID}/issues",
-        {
-            "title": "[E2E] Branching test",
-            "description": "Test conditional routing",
-            "status": "todo",
-            "priority": "low",
-        },
-    )
-    parent_id = issue_result["id"]
-    cleanup_issue_ids.append(parent_id)
-
-    api_post(
-        f"/plugins/{PLUGIN_ID}/actions/trigger-run",
-        {
-            "params": {
-                "companyId": COMPANY_ID,
-                "issueId": parent_id,
-                "pipelineName": "e2e-branching",
-            }
-        },
-    )
-
-    log("Wait for 'check' stage dispatch")
-    stage = poll_until(
-        "check stage",
-        lambda: find_stage_issue(parent_id, "check"),
-        max_attempts=20,
-        interval=2,
-    )
-    check_id = stage["id"]
-    cleanup_issue_ids.append(check_id)
-
-    # Post "no" decision → should route to "fix" stage, skip "done-path"
-    log("Post decision='no' → should route to 'fix' path")
-    body = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "no"}}
-```"""
-    api_post(f"/issues/{check_id}/comments", {"body": body})
-
-    log("Wait for 'fix' stage to dispatch (not 'done-path')")
-    fix_stage = poll_until(
-        "fix stage",
-        lambda: find_stage_issue(parent_id, "fix"),
-        max_attempts=20,
-        interval=2,
-    )
-    fix_id = fix_stage["id"]
-    cleanup_issue_ids.append(fix_id)
-    passed("Correct branch taken: 'fix' dispatched after decision='no'")
-
-    # Check that 'done-path' was skipped (not dispatched)
-    time.sleep(2)
-    done_path_issue = find_stage_issue(parent_id, "done-path")
-    if done_path_issue:
-        # It exists but should be status=skipped or not dispatched
-        warn(
-            f"'done-path' sub-issue exists: {done_path_issue.get('id')} status={done_path_issue.get('status')}"
+    impl_issues = find_all_stage_issues(parent_id, "write-backend-impl")
+    if len(impl_issues) < 2:
+        revision_impl = poll_until(
+            "write-backend-impl revision dispatch",
+            lambda: find_all_stage_issues(parent_id, "write-backend-impl")[1]
+            if len(find_all_stage_issues(parent_id, "write-backend-impl")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
         )
+        revision_impl_id = revision_impl["id"]
     else:
-        passed("'done-path' correctly NOT dispatched (skipped)")
+        revision_impl_id = impl_issues[1]["id"]
 
-    # Complete 'fix' stage
-    log("Complete 'fix' stage")
-    fix_body = f"""{OUTPUT_SENTINEL}
-```json
-{{"decision": "done"}}
-```"""
-    api_post(f"/issues/{fix_id}/comments", {"body": fix_body})
+    post_mock_output(revision_impl_id, "write-implementation")
+    passed("write-backend-impl (revision) → done")
+
+    # After revision: de-slop → sync → PR → CI → reviews → evaluate
+    step(6, "Complete post-revision flow → pipeline done")
+    deslop_issues = find_all_stage_issues(parent_id, "de-slop-backend")
+    if len(deslop_issues) < 2:
+        deslop2 = poll_until(
+            "de-slop-backend revision",
+            lambda: find_all_stage_issues(parent_id, "de-slop-backend")[1]
+            if len(find_all_stage_issues(parent_id, "de-slop-backend")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        deslop2_id = deslop2["id"]
+    else:
+        deslop2_id = deslop_issues[1]["id"]
+    post_mock_output(deslop2_id, "de-slop-verify")
+    passed("de-slop-backend (revision) → done")
+
+    # open-pr (revision)
+    pr_issues = find_all_stage_issues(parent_id, "open-pr")
+    if len(pr_issues) < 2:
+        pr2 = poll_until(
+            "open-pr revision",
+            lambda: find_all_stage_issues(parent_id, "open-pr")[1]
+            if len(find_all_stage_issues(parent_id, "open-pr")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        pr2_id = pr2["id"]
+    else:
+        pr2_id = pr_issues[1]["id"]
+    post_mock_output(pr2_id, "open-pr")
+    passed("open-pr (revision) → done")
+
+    # check-ci (revision)
+    ci_issues = find_all_stage_issues(parent_id, "check-ci")
+    if len(ci_issues) < 2:
+        ci2 = poll_until(
+            "check-ci revision",
+            lambda: find_all_stage_issues(parent_id, "check-ci")[1]
+            if len(find_all_stage_issues(parent_id, "check-ci")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        ci2_id = ci2["id"]
+    else:
+        ci2_id = ci_issues[1]["id"]
+    post_mock_output(ci2_id, "check-ci-pass")
+    passed("check-ci (revision) → pass")
+
+    # dispatch-reviews (revision)
+    dr_issues = find_all_stage_issues(parent_id, "dispatch-reviews")
+    if len(dr_issues) < 2:
+        dr2 = poll_until(
+            "dispatch-reviews revision",
+            lambda: find_all_stage_issues(parent_id, "dispatch-reviews")[1]
+            if len(find_all_stage_issues(parent_id, "dispatch-reviews")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        dr2_id = dr2["id"]
+    else:
+        dr2_id = dr_issues[1]["id"]
+    post_mock_output(dr2_id, "dispatch-reviews-minimal")
+    passed("dispatch-reviews (revision) → minimal")
+
+    # reviews (revision) — all pass this time
+    rq_issues = find_all_stage_issues(parent_id, "review-code-quality")
+    if len(rq_issues) < 2:
+        rq2 = poll_until(
+            "review-code-quality revision",
+            lambda: find_all_stage_issues(parent_id, "review-code-quality")[1]
+            if len(find_all_stage_issues(parent_id, "review-code-quality")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        rq2_id = rq2["id"]
+    else:
+        rq2_id = rq_issues[1]["id"]
+    post_mock_output(rq2_id, "review-approved")
+    passed("review-code-quality (revision) → approved")
+
+    rtc_issues = find_all_stage_issues(parent_id, "review-test-coverage")
+    if len(rtc_issues) < 2:
+        rtc2 = poll_until(
+            "review-test-coverage revision",
+            lambda: find_all_stage_issues(parent_id, "review-test-coverage")[1]
+            if len(find_all_stage_issues(parent_id, "review-test-coverage")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        rtc2_id = rtc2["id"]
+    else:
+        rtc2_id = rtc_issues[1]["id"]
+    post_mock_output(rtc2_id, "review-approved")
+    passed("review-test-coverage (revision) → approved")
+
+    # evaluate-findings (revision)
+    ef_issues = find_all_stage_issues(parent_id, "evaluate-findings")
+    if len(ef_issues) < 2:
+        ef2 = poll_until(
+            "evaluate-findings revision",
+            lambda: find_all_stage_issues(parent_id, "evaluate-findings")[1]
+            if len(find_all_stage_issues(parent_id, "evaluate-findings")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        ef2_id = ef2["id"]
+    else:
+        ef2_id = ef_issues[1]["id"]
+    post_mock_output(ef2_id, "evaluate-findings-pass")
+    passed("evaluate-findings (revision) → pass")
+
+    # simplify (revision)
+    sc_issues = find_all_stage_issues(parent_id, "simplify-code")
+    if len(sc_issues) < 2:
+        sc2 = poll_until(
+            "simplify-code revision",
+            lambda: find_all_stage_issues(parent_id, "simplify-code")[1]
+            if len(find_all_stage_issues(parent_id, "simplify-code")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        sc2_id = sc2["id"]
+    else:
+        sc2_id = sc_issues[1]["id"]
+    post_mock_output(sc2_id, "simplify-code")
+    passed("simplify-code (revision) → done")
+
+    # scenario-validator (revision)
+    sv_issues = find_all_stage_issues(parent_id, "scenario-validator")
+    if len(sv_issues) < 2:
+        sv2 = poll_until(
+            "scenario-validator revision",
+            lambda: find_all_stage_issues(parent_id, "scenario-validator")[1]
+            if len(find_all_stage_issues(parent_id, "scenario-validator")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        sv2_id = sv2["id"]
+    else:
+        sv2_id = sv_issues[1]["id"]
+    post_mock_output(sv2_id, "validate-scenario-result-valid")
+    passed("scenario-validator (revision) → valid")
 
     poll_until(
         "parent done",
@@ -695,234 +846,656 @@ def scenario_conditional_routing():
         max_attempts=20,
         interval=2,
     )
-    passed("Pipeline completed via 'no' → 'fix' branch")
+    passed("Pipeline completed after review revision loop")
 
 
-# ===========================================================================
-# SCENARIO 5: Error edge retry (failure → goto earlier stage)
-# ===========================================================================
-def scenario_error_edge_retry():
-    """Test: stage fails → error edge routes back to retry, eventually succeeds."""
-    global cleanup_pipeline_name, cleanup_issue_ids, run_id
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Scenario validator loops back to frontend impl
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    log("Save pipeline with error edge (validate → implement on failure)")
-    pipeline_def = {
-        "name": "e2e-retry",
-        "description": "Test error edge retry mechanism",
-        "trigger": {"label": "pipeline:feature"},
-        "stages": [
-            {
-                "id": "impl",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "write-implementation",
-            },
-            {
-                "id": "val",
-                "type": "stage",
-                "agent_role": "pipe-backend",
-                "actionId": "validate-scenario",
-            },
-        ],
-        "edges": [
-            {"id": "e1", "from": "impl", "to": "val"},
-            {"id": "e-err", "from": "val", "to": "impl", "type": "error"},
-        ],
-        "positions": {},
-    }
-    save_result = api_post(
-        f"/plugins/{PLUGIN_ID}/actions/save-pipeline",
-        {"params": {"name": "e2e-retry", "content": json.dumps(pipeline_def)}},
-    )
-    if not save_result.get("data", {}).get("success"):
-        fail(f"save-pipeline failed: {save_result}")
-    cleanup_pipeline_name = "e2e-retry"
 
-    log("Create parent issue + trigger")
-    issue_result = api_post(
-        f"/companies/{COMPANY_ID}/issues",
-        {
-            "title": "[E2E] Error edge retry test",
-            "description": "Test retry via error edges",
-            "status": "todo",
-            "priority": "low",
-        },
-    )
-    parent_id = issue_result["id"]
-    cleanup_issue_ids.append(parent_id)
+def scenario_validator_frontend_fix(state: ScenarioState):
+    """Validator says not-valid-frontend → loops back to write-frontend-impl → passes on retry"""
 
-    api_post(
-        f"/plugins/{PLUGIN_ID}/actions/trigger-run",
-        {
-            "params": {
-                "companyId": COMPANY_ID,
-                "issueId": parent_id,
-                "pipelineName": "e2e-retry",
-            }
-        },
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(
+        state, "[E2E] Validator loop: Frontend fix after validation failure"
     )
 
-    # First pass: impl → val
-    log("Wait for 'impl' stage (pass 1)")
-    stage = poll_until(
-        "impl stage",
-        lambda: find_stage_issue(parent_id, "impl"),
-        max_attempts=20,
-        interval=2,
-    )
-    impl_id = stage["id"]
-    cleanup_issue_ids.append(impl_id)
+    step(2, "Fast-path to validator (full pipeline minus reviews details)")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-both")
 
-    log("Complete 'impl' (pass 1)")
-    api_post(
-        f"/issues/{impl_id}/comments",
-        {"body": f'{OUTPUT_SENTINEL}\n```json\n{{"decision": "done"}}\n```'},
+    # Both tracks
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
+    complete_stage(parent_id, "write-frontend-tests", "write-tests")
+    complete_stage(parent_id, "write-frontend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-frontend", "de-slop-verify")
+
+    complete_stage(parent_id, "open-pr", "open-pr")
+    complete_stage(parent_id, "check-ci", "check-ci-pass")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-minimal")
+    complete_stage(parent_id, "review-code-quality", "review-approved")
+    complete_stage(parent_id, "review-test-coverage", "review-approved")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-pass")
+    complete_stage(parent_id, "simplify-code", "simplify-code")
+
+    step(3, "Scenario validator → not-valid-frontend (triggers loop)")
+    complete_stage(
+        parent_id, "scenario-validator", "validate-scenario-result-not-valid-frontend"
     )
 
-    log("Wait for 'val' stage (pass 1)")
-    val_stage = poll_until(
-        "val stage",
-        lambda: find_stage_issue(parent_id, "val"),
-        max_attempts=20,
-        interval=2,
-    )
-    val_id = val_stage["id"]
-    cleanup_issue_ids.append(val_id)
-
-    # Make validate FAIL with invalid JSON (triggers error edge → retry impl)
-    log("Fail 'val' with broken JSON (trigger error edge → retry)")
-    bad_body = f"{OUTPUT_SENTINEL}\n```json\n{{broken\n```"
-    api_post(f"/issues/{val_id}/comments", {"body": bad_body})
+    step(4, "Write frontend impl (fix pass)")
     time.sleep(3)
+    fe_impl_issues = find_all_stage_issues(parent_id, "write-frontend-impl")
+    if len(fe_impl_issues) < 2:
+        fe_fix = poll_until(
+            "write-frontend-impl fix dispatch",
+            lambda: find_all_stage_issues(parent_id, "write-frontend-impl")[1]
+            if len(find_all_stage_issues(parent_id, "write-frontend-impl")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        fe_fix_id = fe_fix["id"]
+    else:
+        fe_fix_id = fe_impl_issues[1]["id"]
+    post_mock_output(fe_fix_id, "write-implementation")
+    passed("write-frontend-impl (fix) → done")
 
-    # Error edge should route back to 'impl' — a NEW sub-issue dispatched
-    log("Wait for 'impl' retry dispatch (pass 2)")
+    step(5, "Complete post-fix flow → pipeline done")
+    # de-slop-frontend (fix)
+    deslop_issues = find_all_stage_issues(parent_id, "de-slop-frontend")
+    if len(deslop_issues) < 2:
+        deslop2 = poll_until(
+            "de-slop-frontend fix",
+            lambda: find_all_stage_issues(parent_id, "de-slop-frontend")[1]
+            if len(find_all_stage_issues(parent_id, "de-slop-frontend")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        deslop2_id = deslop2["id"]
+    else:
+        deslop2_id = deslop_issues[1]["id"]
+    post_mock_output(deslop2_id, "de-slop-verify")
+    passed("de-slop-frontend (fix) → done")
 
-    def find_retry_impl():
-        children = get_child_issues(parent_id)
-        impl_issues = [c for c in children if "[pipeline] impl" in c.get("title", "")]
-        # Should have 2 impl issues now (original + retry)
-        if len(impl_issues) >= 2:
-            # Return the one that is NOT the original impl_id
-            for iss in impl_issues:
-                if iss["id"] != impl_id:
-                    return iss
-            return impl_issues[-1]
-        return None
+    # open-pr (fix)
+    pr_issues = find_all_stage_issues(parent_id, "open-pr")
+    if len(pr_issues) < 2:
+        pr2 = poll_until(
+            "open-pr fix",
+            lambda: find_all_stage_issues(parent_id, "open-pr")[1]
+            if len(find_all_stage_issues(parent_id, "open-pr")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        pr2_id = pr2["id"]
+    else:
+        pr2_id = pr_issues[1]["id"]
+    post_mock_output(pr2_id, "open-pr")
+    passed("open-pr (fix) → done")
 
-    retry_impl = poll_until(
-        "impl retry dispatch", find_retry_impl, max_attempts=25, interval=2
-    )
-    retry_impl_id = retry_impl["id"]
-    cleanup_issue_ids.append(retry_impl_id)
-    passed("Error edge fired: 'impl' re-dispatched after 'val' failure")
+    # check-ci (fix)
+    ci_issues = find_all_stage_issues(parent_id, "check-ci")
+    if len(ci_issues) < 2:
+        ci2 = poll_until(
+            "check-ci fix",
+            lambda: find_all_stage_issues(parent_id, "check-ci")[1]
+            if len(find_all_stage_issues(parent_id, "check-ci")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        ci2_id = ci2["id"]
+    else:
+        ci2_id = ci_issues[1]["id"]
+    post_mock_output(ci2_id, "check-ci-pass")
+    passed("check-ci (fix) → pass")
 
-    # Complete retry impl
-    log("Complete 'impl' (pass 2)")
-    api_post(
-        f"/issues/{retry_impl_id}/comments",
-        {"body": f'{OUTPUT_SENTINEL}\n```json\n{{"decision": "done"}}\n```'},
-    )
+    # dispatch-reviews (fix)
+    dr_issues = find_all_stage_issues(parent_id, "dispatch-reviews")
+    if len(dr_issues) < 2:
+        dr2 = poll_until(
+            "dispatch-reviews fix",
+            lambda: find_all_stage_issues(parent_id, "dispatch-reviews")[1]
+            if len(find_all_stage_issues(parent_id, "dispatch-reviews")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        dr2_id = dr2["id"]
+    else:
+        dr2_id = dr_issues[1]["id"]
+    post_mock_output(dr2_id, "dispatch-reviews-minimal")
+    passed("dispatch-reviews (fix) → minimal")
 
-    # Wait for val retry — look for a NEW val sub-issue (different from val_id)
-    log("Wait for 'val' retry dispatch (pass 2)")
+    # reviews (fix)
+    rq_issues = find_all_stage_issues(parent_id, "review-code-quality")
+    if len(rq_issues) < 2:
+        rq2 = poll_until(
+            "review-code-quality fix",
+            lambda: find_all_stage_issues(parent_id, "review-code-quality")[1]
+            if len(find_all_stage_issues(parent_id, "review-code-quality")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        rq2_id = rq2["id"]
+    else:
+        rq2_id = rq_issues[1]["id"]
+    post_mock_output(rq2_id, "review-approved")
 
-    def find_retry_val():
-        children = get_child_issues(parent_id)
-        val_issues = [
-            c
-            for c in children
-            if "[pipeline] val" in c.get("title", "") and c["id"] != val_id
-        ]
-        if val_issues:
-            return val_issues[-1]
-        return None
+    rtc_issues = find_all_stage_issues(parent_id, "review-test-coverage")
+    if len(rtc_issues) < 2:
+        rtc2 = poll_until(
+            "review-test-coverage fix",
+            lambda: find_all_stage_issues(parent_id, "review-test-coverage")[1]
+            if len(find_all_stage_issues(parent_id, "review-test-coverage")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        rtc2_id = rtc2["id"]
+    else:
+        rtc2_id = rtc_issues[1]["id"]
+    post_mock_output(rtc2_id, "review-approved")
 
-    retry_val = poll_until(
-        "val retry dispatch", find_retry_val, max_attempts=25, interval=2
-    )
-    retry_val_id = retry_val["id"]
-    cleanup_issue_ids.append(retry_val_id)
+    # evaluate-findings (fix)
+    ef_issues = find_all_stage_issues(parent_id, "evaluate-findings")
+    if len(ef_issues) < 2:
+        ef2 = poll_until(
+            "evaluate-findings fix",
+            lambda: find_all_stage_issues(parent_id, "evaluate-findings")[1]
+            if len(find_all_stage_issues(parent_id, "evaluate-findings")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        ef2_id = ef2["id"]
+    else:
+        ef2_id = ef_issues[1]["id"]
+    post_mock_output(ef2_id, "evaluate-findings-pass")
 
-    # Complete val successfully this time
-    log("Complete 'val' successfully (pass 2)")
-    api_post(
-        f"/issues/{retry_val_id}/comments",
-        {"body": f'{OUTPUT_SENTINEL}\n```json\n{{"decision": "yes"}}\n```'},
-    )
+    # simplify (fix)
+    sc_issues = find_all_stage_issues(parent_id, "simplify-code")
+    if len(sc_issues) < 2:
+        sc2 = poll_until(
+            "simplify-code fix",
+            lambda: find_all_stage_issues(parent_id, "simplify-code")[1]
+            if len(find_all_stage_issues(parent_id, "simplify-code")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        sc2_id = sc2["id"]
+    else:
+        sc2_id = sc_issues[1]["id"]
+    post_mock_output(sc2_id, "simplify-code")
+
+    # scenario-validator (fix) — this time it passes
+    sv_issues = find_all_stage_issues(parent_id, "scenario-validator")
+    if len(sv_issues) < 2:
+        sv2 = poll_until(
+            "scenario-validator fix",
+            lambda: find_all_stage_issues(parent_id, "scenario-validator")[1]
+            if len(find_all_stage_issues(parent_id, "scenario-validator")) >= 2
+            else None,
+            max_attempts=25,
+            interval=2,
+        )
+        sv2_id = sv2["id"]
+    else:
+        sv2_id = sv_issues[1]["id"]
+    post_mock_output(sv2_id, "validate-scenario-result-valid")
+    passed("scenario-validator (fix) → valid")
 
     poll_until(
-        "parent done after retry",
+        "parent done",
         lambda: api_get(f"/issues/{parent_id}").get("status") == "done" or None,
         max_attempts=20,
         interval=2,
     )
-    passed("Pipeline recovered via error edge retry and completed")
+    passed("Pipeline completed after validator frontend fix loop")
 
 
-# ===========================================================================
-# MAIN
-# ===========================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Conditional routing — scenario rejected → escalate
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_escalate_no_scenario(state: ScenarioState):
+    """Triage→feature, validate-scenario→no → escalate-scenario (block)"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(state, "[E2E] Escalate: No holdout scenario found")
+
+    step(2, "Triage → feature")
+    complete_stage(parent_id, "triage", "triage-feature")
+
+    step(3, "Validate scenario → no (should route to escalate-scenario block)")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-no")
+
+    step(4, "Verify pipeline is blocked/escalated (escalate-scenario is a block node)")
+    time.sleep(5)
+    parent = api_get(f"/issues/{parent_id}")
+    status = parent.get("status")
+    # Block nodes should escalate or pause the pipeline
+    if status == "done":
+        fail("Pipeline should NOT be done — escalate-scenario should block it")
+    passed(f"Pipeline correctly blocked — parent status: {status}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Spec validation fails → escalate
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_escalate_bad_spec(state: ScenarioState):
+    """Feature path where spec validation fails → escalate-spec block"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(state, "[E2E] Escalate: Spec validation fails")
+
+    step(2, "Triage → feature → scenario yes → create spec")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+
+    step(3, "Validate spec → no (should route to escalate-spec block)")
+    complete_stage(parent_id, "valid-spec", "validate-spec-no")
+
+    step(4, "Verify pipeline is blocked")
+    time.sleep(5)
+    parent = api_get(f"/issues/{parent_id}")
+    status = parent.get("status")
+    if status == "done":
+        fail("Pipeline should NOT be done — escalate-spec should block it")
+    passed(f"Pipeline correctly blocked — parent status: {status}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Backend-only feature (no frontend track)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_backend_only(state: ScenarioState):
+    """Plan outputs only backend track — frontend stages should be skipped"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(
+        state, "[E2E] Backend-only: API endpoint with no UI changes"
+    )
+
+    step(2, "Triage → feature → scenario → spec → plan (backend only)")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-backend-only")
+
+    step(3, "Backend track only: tests → impl → de-slop")
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
+
+    step(4, "Open PR → CI → reviews → evaluate → simplify → validate")
+    complete_stage(parent_id, "open-pr", "open-pr")
+    complete_stage(parent_id, "check-ci", "check-ci-pass")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-minimal")
+    complete_stage(parent_id, "review-code-quality", "review-approved")
+    complete_stage(parent_id, "review-test-coverage", "review-approved")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-pass")
+    complete_stage(parent_id, "simplify-code", "simplify-code")
+    complete_stage(parent_id, "scenario-validator", "validate-scenario-result-valid")
+
+    step(5, "Verify pipeline completed (frontend track skipped)")
+    poll_until(
+        "parent done",
+        lambda: api_get(f"/issues/{parent_id}").get("status") == "done" or None,
+        max_attempts=20,
+        interval=2,
+    )
+
+    # Verify frontend stages were NOT dispatched
+    fe_tests = find_stage_issue(parent_id, "write-frontend-tests")
+    fe_impl = find_stage_issue(parent_id, "write-frontend-impl")
+    if fe_tests or fe_impl:
+        warn("Frontend stages exist but should have been skipped")
+    else:
+        passed("Frontend track correctly skipped")
+
+    passed("Backend-only pipeline completed successfully")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCENARIO: Validator overflow → escalate-validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def scenario_validator_overflow(state: ScenarioState):
+    """Validator fails max_iterations times → escalate-validation block"""
+
+    step(1, "Create issue and trigger")
+    parent_id = create_and_trigger(
+        state, "[E2E] Overflow: Validator exceeds max iterations"
+    )
+
+    step(2, "Fast-path to validator")
+    complete_stage(parent_id, "triage", "triage-feature")
+    complete_stage(parent_id, "valid-scenario", "validate-scenario-yes")
+    complete_stage(parent_id, "create-spec", "create-spec")
+    complete_stage(parent_id, "valid-spec", "validate-spec-yes")
+    complete_stage(parent_id, "plan-tasks", "plan-tasks-backend-only")
+    complete_stage(parent_id, "write-backend-tests", "write-tests")
+    complete_stage(parent_id, "write-backend-impl", "write-implementation")
+    complete_stage(parent_id, "de-slop-backend", "de-slop-verify")
+    complete_stage(parent_id, "open-pr", "open-pr")
+    complete_stage(parent_id, "check-ci", "check-ci-pass")
+    complete_stage(parent_id, "dispatch-reviews", "dispatch-reviews-minimal")
+    complete_stage(parent_id, "review-code-quality", "review-approved")
+    complete_stage(parent_id, "review-test-coverage", "review-approved")
+    complete_stage(parent_id, "evaluate-findings", "evaluate-findings-pass")
+    complete_stage(parent_id, "simplify-code", "simplify-code")
+
+    step(3, "Validator → not-valid-backend (attempt 1)")
+    complete_stage(
+        parent_id, "scenario-validator", "validate-scenario-result-not-valid-backend"
+    )
+
+    step(4, "Complete backend fix loop (attempt 1)")
+    time.sleep(3)
+    impl_issues = find_all_stage_issues(parent_id, "write-backend-impl")
+    fix1 = poll_until(
+        "write-backend-impl fix 1",
+        lambda: find_all_stage_issues(parent_id, "write-backend-impl")[1]
+        if len(find_all_stage_issues(parent_id, "write-backend-impl")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(fix1["id"], "write-implementation")
+
+    # de-slop → sync → PR → CI → reviews → evaluate → simplify
+    deslop2 = poll_until(
+        "de-slop-backend fix 1",
+        lambda: find_all_stage_issues(parent_id, "de-slop-backend")[1]
+        if len(find_all_stage_issues(parent_id, "de-slop-backend")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(deslop2["id"], "de-slop-verify")
+
+    pr2 = poll_until(
+        "open-pr fix 1",
+        lambda: find_all_stage_issues(parent_id, "open-pr")[1]
+        if len(find_all_stage_issues(parent_id, "open-pr")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(pr2["id"], "open-pr")
+
+    ci2 = poll_until(
+        "check-ci fix 1",
+        lambda: find_all_stage_issues(parent_id, "check-ci")[1]
+        if len(find_all_stage_issues(parent_id, "check-ci")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(ci2["id"], "check-ci-pass")
+
+    dr2 = poll_until(
+        "dispatch-reviews fix 1",
+        lambda: find_all_stage_issues(parent_id, "dispatch-reviews")[1]
+        if len(find_all_stage_issues(parent_id, "dispatch-reviews")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(dr2["id"], "dispatch-reviews-minimal")
+
+    rq2 = poll_until(
+        "review-code-quality fix 1",
+        lambda: find_all_stage_issues(parent_id, "review-code-quality")[1]
+        if len(find_all_stage_issues(parent_id, "review-code-quality")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(rq2["id"], "review-approved")
+
+    rtc2 = poll_until(
+        "review-test-coverage fix 1",
+        lambda: find_all_stage_issues(parent_id, "review-test-coverage")[1]
+        if len(find_all_stage_issues(parent_id, "review-test-coverage")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(rtc2["id"], "review-approved")
+
+    ef2 = poll_until(
+        "evaluate-findings fix 1",
+        lambda: find_all_stage_issues(parent_id, "evaluate-findings")[1]
+        if len(find_all_stage_issues(parent_id, "evaluate-findings")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(ef2["id"], "evaluate-findings-pass")
+
+    sc2 = poll_until(
+        "simplify-code fix 1",
+        lambda: find_all_stage_issues(parent_id, "simplify-code")[1]
+        if len(find_all_stage_issues(parent_id, "simplify-code")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(sc2["id"], "simplify-code")
+
+    step(5, "Validator → not-valid-backend AGAIN (attempt 2 = max_iterations)")
+    sv2 = poll_until(
+        "scenario-validator attempt 2",
+        lambda: find_all_stage_issues(parent_id, "scenario-validator")[1]
+        if len(find_all_stage_issues(parent_id, "scenario-validator")) >= 2
+        else None,
+        max_attempts=25,
+        interval=2,
+    )
+    post_mock_output(sv2["id"], "validate-scenario-result-not-valid-backend")
+
+    step(6, "Verify pipeline escalated (max_iterations=2 exhausted)")
+    time.sleep(5)
+    parent = api_get(f"/issues/{parent_id}")
+    status = parent.get("status")
+    if status == "done":
+        fail("Pipeline should NOT be done — should have escalated due to overflow")
+    passed(f"Pipeline correctly escalated after validator overflow — status: {status}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI + Main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ALL_SCENARIOS = [
+    (
+        "full-feature-happy-path",
+        "Full feature flow (all stages, happy path)",
+        scenario_full_feature_happy_path,
+    ),
+    (
+        "ci-failure-retry",
+        "CI fails → fix → retry loop → pass",
+        scenario_ci_failure_retry,
+    ),
+    (
+        "review-revision-loop",
+        "Reviews find critical issues → revision loop → pass",
+        scenario_review_revision_loop,
+    ),
+    (
+        "validator-frontend-fix",
+        "Validator says not-valid-frontend → fix loop → pass",
+        scenario_validator_frontend_fix,
+    ),
+    (
+        "escalate-no-scenario",
+        "No holdout scenario → escalate block",
+        scenario_escalate_no_scenario,
+    ),
+    (
+        "escalate-bad-spec",
+        "Spec validation fails → escalate block",
+        scenario_escalate_bad_spec,
+    ),
+    (
+        "backend-only",
+        "Backend-only plan → frontend skipped",
+        scenario_backend_only,
+    ),
+    (
+        "validator-overflow",
+        "Validator exceeds max_iterations → escalate",
+        scenario_validator_overflow,
+    ),
+]
+
+
+def run_scenario(name, description, fn, no_cleanup=False):
+    state = ScenarioState(name=name, should_cleanup=not no_cleanup)
+    print()
+    print(f"{C.BOLD}{C.CYAN}{'═' * 70}{C.NC}")
+    print(f"{C.BOLD}{C.CYAN}  SCENARIO: {description}{C.NC}")
+    print(f"{C.BOLD}{C.CYAN}{'═' * 70}{C.NC}")
+
+    try:
+        fn(state)
+        print(f"\n{C.GREEN}  ✓ PASSED: {description}{C.NC}")
+        return True
+    except ScenarioFailed as e:
+        print(f"\n{C.RED}  ✗ FAILED: {description}{C.NC}")
+        print(f"{C.RED}    Reason: {e}{C.NC}")
+        return False
+    except Exception as e:
+        print(f"\n{C.RED}  ✗ ERROR: {description}{C.NC}")
+        print(f"{C.RED}    {type(e).__name__}: {e}{C.NC}")
+        return False
+    finally:
+        state.cleanup()
+
+
 def main():
-    global AGENTS_TO_PAUSE
+    parser = argparse.ArgumentParser(
+        description="E2E Pipeline Engine tests with mock agent outputs"
+    )
+    parser.add_argument(
+        "--scenario",
+        "-s",
+        help="Run only scenarios matching this substring (e.g. 'happy', 'ci', 'validator')",
+    )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Leave test artifacts in the UI for inspection",
+    )
+    parser.add_argument(
+        "--cleanup-only",
+        action="store_true",
+        help="Clean up issues from a previous --no-cleanup run (by title prefix)",
+    )
+    parser.add_argument(
+        "--list", "-l", action="store_true", help="List available scenarios and exit"
+    )
+    args = parser.parse_args()
 
-    log("Step 0: Verify prerequisites")
-    health = api_get("/health")
-    log(f"  Server version: {health['version']}")
+    if args.list:
+        print(f"\n{C.BOLD}Available scenarios:{C.NC}\n")
+        for key, desc, _ in ALL_SCENARIOS:
+            print(f"  {C.CYAN}{key:30s}{C.NC} {desc}")
+        print(f"\n  Use --scenario <substring> to filter.\n")
+        return
+
+    if args.cleanup_only:
+        log("Cleaning up E2E test issues...")
+        issues = api_get(f"/companies/{COMPANY_ID}/issues?limit=100")
+        e2e_issues = [i for i in issues if i.get("title", "").startswith("[E2E]")]
+        for issue in e2e_issues:
+            # Delete children first
+            children = get_child_issues(issue["id"])
+            for child in children:
+                api_delete(f"/issues/{child['id']}")
+            api_delete(f"/issues/{issue['id']}")
+            log(f"  Deleted: {issue['title']}")
+        log(f"  Cleaned up {len(e2e_issues)} E2E issue(s)")
+        return
+
+    # Prerequisites
+    log("Checking prerequisites...")
+    try:
+        health = api_get("/health")
+        log(f"  Server version: {health.get('version', 'unknown')}")
+    except Exception as e:
+        print(f"{C.RED}Server not reachable: {e}{C.NC}")
+        sys.exit(1)
+
     plugins = api_get("/plugins")
     plugin = next((p for p in plugins if p["id"] == PLUGIN_ID), None)
     if not plugin or plugin["status"] != "ready":
-        fail(f"Plugin not ready (status={plugin['status'] if plugin else 'NOT FOUND'})")
+        print(
+            f"{C.RED}Pipeline engine plugin not ready (status={plugin['status'] if plugin else 'NOT FOUND'}){C.NC}"
+        )
+        sys.exit(1)
     passed("Prerequisites OK")
 
-    # Pause all agents in the company to prevent them from claiming dispatched issues
-    log("Pausing agents to prevent interference...")
-    agents = api_get(f"/companies/{COMPANY_ID}/agents")
-    for agent in agents:
-        if agent.get("status") != "paused":
-            try:
-                api_post(f"/agents/{agent['id']}/pause", {})
-                AGENTS_TO_PAUSE.append(agent["id"])
-                log(f"  Paused: {agent['name']} ({agent['id'][:8]})")
-            except Exception as e:
-                warn(f"  Could not pause {agent['name']}: {e}")
-    passed(f"Paused {len(AGENTS_TO_PAUSE)} agent(s)")
+    # Pause agents
+    pause_all_agents()
+
+    # Run scenarios
+    scenarios_to_run = ALL_SCENARIOS
+    if args.scenario:
+        scenarios_to_run = [
+            (k, d, f)
+            for k, d, f in ALL_SCENARIOS
+            if args.scenario.lower() in k.lower() or args.scenario.lower() in d.lower()
+        ]
+        if not scenarios_to_run:
+            print(f"{C.RED}No scenarios match '{args.scenario}'{C.NC}")
+            resume_all_agents()
+            sys.exit(1)
 
     results = []
-    # Allow filtering scenarios via CLI arg
-    scenario_filter = sys.argv[1] if len(sys.argv) > 1 else None
-    all_scenarios = [
-        ("Happy Path (2-stage linear)", scenario_happy_path),
-        ("Invalid Output Format", scenario_invalid_output),
-        ("Blocking Decision (ci-blocked)", scenario_blocking_decision),
-        ("Conditional Routing (sourceHandle)", scenario_conditional_routing),
-        ("Error Edge Retry", scenario_error_edge_retry),
-    ]
-    for name, fn in all_scenarios:
-        if scenario_filter and scenario_filter.lower() not in name.lower():
-            continue
-        results.append(run_scenario(name, fn))
+    try:
+        for key, desc, fn in scenarios_to_run:
+            results.append(run_scenario(key, desc, fn, no_cleanup=args.no_cleanup))
+    finally:
+        resume_all_agents()
 
     # Summary
     print()
-    print(f"{Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"{C.BOLD}{'═' * 70}{C.NC}")
     total = len(results)
     passed_count = sum(results)
     failed_count = total - passed_count
     if failed_count == 0:
-        print(f"{Colors.GREEN} ALL {total} SCENARIOS PASSED{Colors.NC}")
+        print(f"{C.GREEN}{C.BOLD}  ALL {total} SCENARIOS PASSED{C.NC}")
     else:
-        print(f"{Colors.RED} {failed_count}/{total} SCENARIOS FAILED{Colors.NC}")
-    print(f"{Colors.CYAN}{'═' * 60}{Colors.NC}")
-
-    # Resume all paused agents
-    log("Resuming agents...")
-    for agent_id in AGENTS_TO_PAUSE:
-        try:
-            api_post(f"/agents/{agent_id}/resume", {})
-        except Exception:
-            pass
-    log(f"  Resumed {len(AGENTS_TO_PAUSE)} agent(s)")
+        print(f"{C.RED}{C.BOLD}  {failed_count}/{total} SCENARIOS FAILED{C.NC}")
+        for i, (key, desc, _) in enumerate(scenarios_to_run):
+            status = f"{C.GREEN}✓{C.NC}" if results[i] else f"{C.RED}✗{C.NC}"
+            print(f"    {status} {desc}")
+    print(f"{C.BOLD}{'═' * 70}{C.NC}")
+    print()
 
     sys.exit(0 if failed_count == 0 else 1)
 
@@ -930,7 +1503,13 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        print(f"\n{C.YELLOW}Interrupted. Resuming agents...{C.NC}")
+        resume_all_agents()
+        sys.exit(130)
     except SystemExit:
         raise
     except Exception as e:
-        fail(f"Unexpected error: {e}")
+        print(f"{C.RED}Unexpected error: {e}{C.NC}")
+        resume_all_agents()
+        sys.exit(1)

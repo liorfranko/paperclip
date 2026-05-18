@@ -1,5 +1,6 @@
 import { getActionById } from "../actions/index.js";
 import { getIncomingEdges, getErrorEdges, getRootStageIds } from "./edge-utils.js";
+import { getLoopBodyStageIds } from "./loop-resolver.js";
 import type { EdgeDefinition, FailureAction, PipelineDefinition, PipelineStage, StageDefinition } from "../types.js";
 
 export class Router {
@@ -207,9 +208,43 @@ export class Router {
         }
       }
 
-      // Skip if all sources resolved but no edge is satisfied
+      // Skip if all sources resolved but no edge is satisfied —
+      // UNLESS:
+      //   1. A source might be re-executed via a loop with remaining iterations, AND
+      //   2. This stage is NOT inside the loop body (stages inside the body SHOULD be
+      //      skipped so fan_in nodes can proceed — they'll be reset when the loop fires)
       if (!anySatisfied) {
-        skipped.push(stageDef);
+        let protectedByLoop = false;
+        for (const edge of nonLoopEdges) {
+          const sourceRow = stageStatusMap.get(edge.from);
+          if (sourceRow?.status !== "completed") continue;
+
+          const loopsInvolvingSource = edges.filter(
+            (e) => e.type === "loop" && (e.to === edge.from || e.from === edge.from),
+          );
+          for (const loopEdge of loopsInvolvingSource) {
+            const edgeCount = counts[loopEdge.id] ?? 0;
+            if (edgeCount >= (loopEdge.max_iterations ?? 0)) continue;
+            // If loop edge has a sourceHandle, check if the source's output would fire it.
+            // If not, this loop won't actually re-run the source — no protection needed.
+            if (loopEdge.sourceHandle) {
+              const loopSourceRow = stageStatusMap.get(loopEdge.from);
+              const srcOutput = loopSourceRow?.output as Record<string, unknown> | null;
+              if (srcOutput?.decision !== loopEdge.sourceHandle) continue;
+            }
+            // Source can be re-run. But only protect this stage if it's NOT inside the loop body.
+            const loopBody = getLoopBodyStageIds(loopEdge.to, loopEdge.from, pipeline);
+            const inLoopBody = loopBody.includes(stageDef.id) || stageDef.id === loopEdge.to;
+            if (!inLoopBody) {
+              protectedByLoop = true;
+              break;
+            }
+          }
+          if (protectedByLoop) break;
+        }
+        if (!protectedByLoop) {
+          skipped.push(stageDef);
+        }
       }
     }
 
