@@ -39,11 +39,15 @@ export class Router {
           ready.push(stageDef);
           continue;
         }
-        // Check if any loop edge is satisfied (source completed, iterations remain)
+        // Check if any loop edge is satisfied (source completed, iterations remain, sourceHandle matches)
         const loopSatisfied = incomingEdges.some((e) => {
           if (e.type !== "loop") return false;
           const src = stageStatusMap.get(e.from);
           if (src?.status !== "completed") return false;
+          if (e.sourceHandle) {
+            const srcOutput = src.output as Record<string, unknown> | null;
+            if (srcOutput?.decision !== e.sourceHandle) return false;
+          }
           const edgeCount = counts[e.id] ?? 0;
           return edgeCount < (e.max_iterations ?? 0);
         });
@@ -68,6 +72,10 @@ export class Router {
         if (edge.type === "loop") {
           const sourceRow = stageStatusMap.get(edge.from);
           if (sourceRow?.status === "completed") {
+            if (edge.sourceHandle) {
+              const srcOutput = sourceRow.output as Record<string, unknown> | null;
+              if (srcOutput?.decision !== edge.sourceHandle) { continue; }
+            }
             const edgeCount = counts[edge.id] ?? 0;
             if (edgeCount < (edge.max_iterations ?? 0)) {
               hasAnySatisfiedEdge = true;
@@ -130,6 +138,10 @@ export class Router {
     return incomingLoopEdges.filter((edge) => {
       const sourceRow = stageStatusMap.get(edge.from);
       if (!sourceRow || sourceRow.status !== "completed") return false;
+      if (edge.sourceHandle) {
+        const srcOutput = sourceRow.output as Record<string, unknown> | null;
+        if (srcOutput?.decision !== edge.sourceHandle) return false;
+      }
       const edgeCount = counts[edge.id] ?? 0;
       return edgeCount < (edge.max_iterations ?? 0);
     });
