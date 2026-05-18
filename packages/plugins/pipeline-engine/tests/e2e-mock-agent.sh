@@ -44,20 +44,20 @@ cleanup() {
   if [ -n "${RUN_ID:-}" ]; then
     curl -sf -X POST "$BASE/plugins/$PLUGIN_ID/actions/cancel-run" \
       -H "Content-Type: application/json" \
-      -d "{\"runId\": \"$RUN_ID\"}" 2>/dev/null || true
+      -d "{\"params\": {\"runId\": \"$RUN_ID\"}}" 2>/dev/null || true
   fi
   # Delete e2e-test pipeline
   if [ -n "$CLEANUP_PIPELINE_NAME" ]; then
     curl -sf -X POST "$BASE/plugins/$PLUGIN_ID/actions/delete-pipeline" \
       -H "Content-Type: application/json" \
-      -d "{\"name\": \"$CLEANUP_PIPELINE_NAME\"}" 2>/dev/null || true
+      -d "{\"params\": {\"name\": \"$CLEANUP_PIPELINE_NAME\"}}" 2>/dev/null || true
     log "Deleted pipeline: $CLEANUP_PIPELINE_NAME"
   fi
   # Delete created issues
-  for iid in "${CLEANUP_ISSUE_IDS[@]}"; do
+  for iid in "${CLEANUP_ISSUE_IDS[@]+"${CLEANUP_ISSUE_IDS[@]}"}"; do
     curl -sf -X DELETE "$BASE/issues/$iid" 2>/dev/null || true
   done
-  if [ ${#CLEANUP_ISSUE_IDS[@]} -gt 0 ]; then
+  if [ "${#CLEANUP_ISSUE_IDS[@]}" -gt 0 ] 2>/dev/null; then
     log "Deleted ${#CLEANUP_ISSUE_IDS[@]} issue(s)"
   fi
   log "Cleanup complete."
@@ -72,8 +72,8 @@ poll_until() {
   local cmd="$2"
   local max_attempts="${3:-30}"
   local interval="${4:-2}"
-  
-  log "Polling: $description (max ${max_attempts}x${interval}s)..."
+
+  echo -e "${CYAN}[E2E]${NC} Polling: $description (max ${max_attempts}x${interval}s)..." >&2
   for ((i=1; i<=max_attempts; i++)); do
     if result=$(eval "$cmd" 2>/dev/null) && [ -n "$result" ]; then
       echo "$result"
@@ -111,40 +111,44 @@ log "Step 1: Save minimal e2e-test pipeline"
 PIPELINE_JSON=$(cat <<'EOF'
 {
   "name": "e2e-test",
-  "version": "1.0.0",
-  "trigger_labels": ["pipeline:feature"],
+  "description": "E2E test pipeline",
+  "trigger": { "label": "pipeline:feature" },
   "stages": [
     {
       "id": "implement",
-      "type": "agent_task",
+      "type": "stage",
       "agent_role": "pipe-backend",
-      "description": "Implement the feature",
-      "timeout_minutes": 5
+      "actionId": "triage-new-issues"
     },
     {
       "id": "validate",
-      "type": "agent_task",
+      "type": "stage",
       "agent_role": "pipe-backend",
-      "description": "Validate the implementation",
-      "timeout_minutes": 5
+      "actionId": "triage-new-issues"
     }
   ],
   "edges": [
-    { "from": "implement", "to": "validate" }
-  ]
+    { "id": "e1", "from": "implement", "to": "validate" }
+  ],
+  "positions": {
+    "implement": { "x": 0, "y": 0 },
+    "validate": { "x": 0, "y": 200 }
+  }
 }
 EOF
 )
 
+SAVE_BODY=$(python3 -c "
+import json, sys
+content = sys.stdin.read().strip()
+print(json.dumps({'params': {'name': 'e2e-test', 'content': content}}))
+" <<< "$PIPELINE_JSON")
+
 SAVE_RESULT=$(curl -sf -X POST "$BASE/plugins/$PLUGIN_ID/actions/save-pipeline" \
   -H "Content-Type: application/json" \
-  -d "$(python3 -c "
-import json
-content = '''$PIPELINE_JSON'''
-print(json.dumps({'name': 'e2e-test', 'content': content}))
-")")
+  -d "$SAVE_BODY")
 
-echo "$SAVE_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('success'), f'save-pipeline failed: {d}'"
+echo "$SAVE_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('data',{}).get('success'), f'save-pipeline failed: {d}'"
 CLEANUP_PIPELINE_NAME="e2e-test"
 pass "Pipeline 'e2e-test' saved"
 
@@ -153,9 +157,7 @@ pass "Pipeline 'e2e-test' saved"
 # =============================================================================
 log "Step 2: Create trigger issue"
 
-ISSUE_RESULT=$(curl -sf -X POST "$BASE/companies/$COMPANY_ID/issues" \
-  -H "Content-Type: application/json" \
-  -d "$(python3 -c "
+ISSUE_BODY=$(python3 -c "
 import json
 print(json.dumps({
     'title': '[E2E Test] Pipeline mock agent test',
@@ -164,7 +166,11 @@ print(json.dumps({
     'priority': 'low',
     'labelIds': ['$LABEL_FEATURE']
 }))
-")")
+")
+
+ISSUE_RESULT=$(curl -sf -X POST "$BASE/companies/$COMPANY_ID/issues" \
+  -H "Content-Type: application/json" \
+  -d "$ISSUE_BODY")
 
 PARENT_ISSUE_ID=$(echo "$ISSUE_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 [ -n "$PARENT_ISSUE_ID" ] || fail "Failed to create parent issue"
@@ -181,16 +187,11 @@ RUN_ID=$(poll_until "pipeline run created" "
   curl -sf '$BASE/companies/$COMPANY_ID/issues?parentId=$PARENT_ISSUE_ID&limit=10' | python3 -c \"
 import sys, json
 issues = json.load(sys.stdin)
-# If a sub-issue with '[pipeline]' in title exists, the run started
 for i in issues:
     if '[pipeline]' in i.get('title',''):
-        # Get the run via the plugin API
-        import urllib.request
-        req = urllib.request.Request('$BASE/plugins/paperclipai.pipeline-engine/api/runs?issueId=$PARENT_ISSUE_ID')
-        # Fallback: look for the stage sub-issue
         print('FOUND')
         break
-\" 2>/dev/null | head -1
+\"
 " 20 3)
 
 # Alternative: use the runs route or check via state
@@ -204,12 +205,12 @@ import sys, json
 issues = json.load(sys.stdin)
 for i in issues:
     if '[pipeline] implement' in i.get('title',''):
-        print(json.dumps({'id': i['id'], 'title': i['title']}))
+        print(i['id'])
         break
 \"
 " 20 3)
 
-STAGE1_ISSUE_ID=$(echo "$STAGE1_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+STAGE1_ISSUE_ID="$STAGE1_INFO"
 [ -n "$STAGE1_ISSUE_ID" ] || fail "Stage 1 sub-issue not found"
 CLEANUP_ISSUE_IDS+=("$STAGE1_ISSUE_ID")
 log "  Stage 1 issue: $STAGE1_ISSUE_ID"
@@ -225,13 +226,15 @@ COMMENT_BODY='<!-- pipeline-output -->
 {"status": "success", "files_changed": ["src/feature.ts"], "summary": "Implemented the feature"}
 ```'
 
+COMMENT_JSON=$(python3 -c "
+import json, sys
+body = sys.stdin.read()
+print(json.dumps({'body': body}))
+" <<< "$COMMENT_BODY")
+
 COMMENT_RESULT=$(curl -sf -X POST "$BASE/issues/$STAGE1_ISSUE_ID/comments" \
   -H "Content-Type: application/json" \
-  -d "$(python3 -c "
-import json
-body = '''$COMMENT_BODY'''
-print(json.dumps({'body': body}))
-")")
+  -d "$COMMENT_JSON")
 
 COMMENT_ID=$(echo "$COMMENT_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
 [ -n "$COMMENT_ID" ] || fail "Failed to post comment on stage 1"
@@ -249,12 +252,12 @@ import sys, json
 issues = json.load(sys.stdin)
 for i in issues:
     if '[pipeline] validate' in i.get('title',''):
-        print(json.dumps({'id': i['id'], 'title': i['title']}))
+        print(i['id'])
         break
 \"
 " 20 3)
 
-STAGE2_ISSUE_ID=$(echo "$STAGE2_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+STAGE2_ISSUE_ID="$STAGE2_INFO"
 [ -n "$STAGE2_ISSUE_ID" ] || fail "Stage 2 sub-issue not found"
 CLEANUP_ISSUE_IDS+=("$STAGE2_ISSUE_ID")
 log "  Stage 2 issue: $STAGE2_ISSUE_ID"
@@ -270,13 +273,15 @@ COMMENT_BODY2='<!-- pipeline-output -->
 {"status": "success", "validation_passed": true, "tests_run": 12, "tests_passed": 12}
 ```'
 
+COMMENT_JSON2=$(python3 -c "
+import json, sys
+body = sys.stdin.read()
+print(json.dumps({'body': body}))
+" <<< "$COMMENT_BODY2")
+
 COMMENT_RESULT2=$(curl -sf -X POST "$BASE/issues/$STAGE2_ISSUE_ID/comments" \
   -H "Content-Type: application/json" \
-  -d "$(python3 -c "
-import json
-body = '''$COMMENT_BODY2'''
-print(json.dumps({'body': body}))
-")")
+  -d "$COMMENT_JSON2")
 
 COMMENT_ID2=$(echo "$COMMENT_RESULT2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
 [ -n "$COMMENT_ID2" ] || fail "Failed to post comment on stage 2"

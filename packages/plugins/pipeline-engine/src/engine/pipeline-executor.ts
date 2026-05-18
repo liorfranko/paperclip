@@ -208,6 +208,24 @@ export async function advancePipeline(
           await stateMachine.updateStageStatus(stageRow.id, "completed");
           ctx.logger.info("Fan-in sync point auto-completed", { runId, stageId: stageDef.id });
           ctx.streams.emit(STREAM_RUN_PROGRESS, { runId, stageId: stageDef.id, status: "completed" });
+
+          // Process outgoing loop edges from the auto-completed fan_in/stage
+          const outgoingLoops = (pipeline.edges ?? []).filter(
+            (e) => e.from === stageDef.id && e.type === "loop",
+          );
+          for (const loopEdge of outgoingLoops) {
+            const edgeCount = loopEdgeCounts[loopEdge.id] ?? 0;
+            if (edgeCount >= (loopEdge.max_iterations ?? 0)) continue;
+            // fan_in has no output, so sourceHandle check always passes (no handle = unconditional)
+            if (loopEdge.sourceHandle) continue;
+            await stateMachine.incrementLoopEdgeCount(runId, loopEdge.id);
+            loopEdgeCounts[loopEdge.id] = (loopEdgeCounts[loopEdge.id] ?? 0) + 1;
+            const loopBody = getLoopBodyStageIds(loopEdge.to, loopEdge.from, pipeline);
+            const stagesToReset = [loopEdge.to, ...loopBody.filter((id) => id !== loopEdge.to)];
+            await stateMachine.resetLoopBodyStages(runId, stagesToReset);
+            ctx.logger.info("Loop edge fired from auto-completed stage", { runId, edgeId: loopEdge.id, target: loopEdge.to });
+          }
+
           hasAutoCompleted = true;
           continue;
         }
