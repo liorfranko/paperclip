@@ -7000,10 +7000,12 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           .from(issues)
           .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
           .then((rows) => rows[0] ?? null);
-        if (parentIssue?.executionWorkspaceId) {
-          resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
+        if (parentIssue?.identifier) {
           parentIdentifier = parentIssue.identifier;
           parentTitle = parentIssue.title;
+        }
+        if (parentIssue?.executionWorkspaceId) {
+          resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
         } else {
           logger.debug(
             { issueId, parentId: issueRef.parentId, found: !!parentIssue },
