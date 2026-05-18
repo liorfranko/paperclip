@@ -6989,25 +6989,31 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     let resolvedExecutionWorkspaceId = issueRef?.executionWorkspaceId ?? null;
     let parentIdentifier: string | null = null;
     let parentTitle: string | null = null;
-    // Deferred inheritance: if reuse_existing but no workspace ID yet, look up parent's workspace
     if (
       !resolvedExecutionWorkspaceId &&
       issueRef?.executionWorkspacePreference === "reuse_existing" &&
       issueRef.parentId
     ) {
-      const parentIssue = await db
-        .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier, title: issues.title })
-        .from(issues)
-        .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
-        .then((rows) => rows[0] ?? null);
-      if (parentIssue?.executionWorkspaceId) {
-        resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
-        parentIdentifier = parentIssue.identifier;
-        parentTitle = parentIssue.title;
-      } else {
-        logger.debug(
-          { issueId, parentId: issueRef.parentId, found: !!parentIssue },
-          "Deferred workspace inheritance: parent workspace not available yet",
+      try {
+        const parentIssue = await db
+          .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier, title: issues.title })
+          .from(issues)
+          .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
+          .then((rows) => rows[0] ?? null);
+        if (parentIssue?.executionWorkspaceId) {
+          resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
+          parentIdentifier = parentIssue.identifier;
+          parentTitle = parentIssue.title;
+        } else {
+          logger.debug(
+            { issueId, parentId: issueRef.parentId, found: !!parentIssue },
+            "Deferred workspace inheritance: parent workspace not available yet",
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { err, issueId, parentId: issueRef.parentId },
+          "Deferred workspace inheritance: failed to query parent, proceeding without inheritance",
         );
       }
     }
