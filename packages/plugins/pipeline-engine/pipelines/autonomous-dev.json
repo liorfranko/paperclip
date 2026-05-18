@@ -1,6 +1,6 @@
 {
   "name": "autonomous-dev",
-  "version": 7,
+  "version": 8,
   "description": "Full autonomous development pipeline — triage → validate → plan → implement → review (7 specialized reviewers) → gate → simplify → validate",
   "trigger": { "label": "pipeline:autonomous-dev" },
   "stages": [
@@ -97,6 +97,8 @@
 
     { "id": "e-simplify-done", "from": "simplify-code", "to": "scenario-validator" },
 
+    { "id": "e-validator-fix-frontend", "from": "scenario-validator", "to": "write-frontend-impl", "sourceHandle": "not-valid-frontend", "type": "loop", "max_iterations": 2, "label": "Validator fix frontend (max 2)" },
+    { "id": "e-validator-fix-backend", "from": "scenario-validator", "to": "write-backend-impl", "sourceHandle": "not-valid-backend", "type": "loop", "max_iterations": 2, "label": "Validator fix backend (max 2)" },
     { "id": "e-validator-invalid", "from": "scenario-validator", "to": "escalate-validation", "sourceHandle": "not-valid" }
   ],
   "positions": {

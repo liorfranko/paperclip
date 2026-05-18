@@ -2426,6 +2426,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         status: issues.status,
         workMode: issues.workMode,
         priority: issues.priority,
+        parentId: issues.parentId,
         projectId: issues.projectId,
         projectWorkspaceId: issues.projectWorkspaceId,
         executionWorkspaceId: issues.executionWorkspaceId,
@@ -6907,6 +6908,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           priority: issueContext.priority,
           workMode: issueContext.workMode,
           description: issueContext.description,
+          parentId: issueContext.parentId,
           projectId: issueContext.projectId,
           projectWorkspaceId: issueContext.projectWorkspaceId,
           executionWorkspaceId: issueContext.executionWorkspaceId,
@@ -6984,8 +6986,39 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     } else {
       delete context.paperclipTaskMarkdown;
     }
+    let resolvedExecutionWorkspaceId = issueRef?.executionWorkspaceId ?? null;
+    let parentIdentifier: string | null = null;
+    let parentTitle: string | null = null;
+    if (
+      !resolvedExecutionWorkspaceId &&
+      issueRef?.executionWorkspacePreference === "reuse_existing" &&
+      issueRef.parentId
+    ) {
+      try {
+        const parentIssue = await db
+          .select({ executionWorkspaceId: issues.executionWorkspaceId, identifier: issues.identifier, title: issues.title })
+          .from(issues)
+          .where(and(eq(issues.id, issueRef.parentId), eq(issues.companyId, agent.companyId)))
+          .then((rows) => rows[0] ?? null);
+        if (parentIssue?.executionWorkspaceId) {
+          resolvedExecutionWorkspaceId = parentIssue.executionWorkspaceId;
+          parentIdentifier = parentIssue.identifier;
+          parentTitle = parentIssue.title;
+        } else {
+          logger.debug(
+            { issueId, parentId: issueRef.parentId, found: !!parentIssue },
+            "Deferred workspace inheritance: parent workspace not available yet",
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { err, issueId, parentId: issueRef.parentId },
+          "Deferred workspace inheritance: failed to query parent, proceeding without inheritance",
+        );
+      }
+    }
     const existingExecutionWorkspace =
-      issueRef?.executionWorkspaceId ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId) : null;
+      resolvedExecutionWorkspaceId ? await executionWorkspacesSvc.getById(resolvedExecutionWorkspaceId) : null;
     const shouldReuseExisting =
       issueRef?.executionWorkspacePreference === "reuse_existing" &&
       existingExecutionWorkspace !== null &&
@@ -7112,10 +7145,13 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           workspace: existingExecutionWorkspace,
         })
       : null;
+    const workspaceIssueRef = parentIdentifier
+      ? { id: issueRef?.parentId ?? issueRef?.id ?? "", identifier: parentIdentifier, title: parentTitle }
+      : issueRef;
     const executionWorkspace = reusedExecutionWorkspace ?? await realizeExecutionWorkspace({
           base: executionWorkspaceBase,
           config: runtimeConfig,
-          issue: issueRef,
+          issue: workspaceIssueRef,
           agent: {
             id: agent.id,
             name: agent.name,
@@ -7250,6 +7286,34 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       }
       if (Object.keys(nextIssuePatch).length > 0) {
         await issuesSvc.update(issueId, nextIssuePatch);
+      }
+      // Propagate workspace to parent so sibling sub-issues can inherit it (best-effort, CAS guard)
+      if (
+        issueRef?.parentId &&
+        issueRef.executionWorkspacePreference === "reuse_existing" &&
+        !issueRef.executionWorkspaceId
+      ) {
+        try {
+          await db
+            .update(issues)
+            .set({
+              executionWorkspaceId: persistedExecutionWorkspace.id,
+              executionWorkspacePreference: "reuse_existing",
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(issues.id, issueRef.parentId),
+                eq(issues.companyId, agent.companyId),
+                isNull(issues.executionWorkspaceId),
+              ),
+            );
+        } catch (err) {
+          logger.warn(
+            { err, issueId, parentId: issueRef.parentId, executionWorkspaceId: persistedExecutionWorkspace.id },
+            "Failed to propagate execution workspace to parent issue",
+          );
+        }
       }
     }
     if (persistedExecutionWorkspace) {
@@ -8371,7 +8435,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         (issue.status === "todo" || issue.status === "in_progress") &&
         !issue.assigneeUserId &&
         issue.assigneeAgentId === run.agentId &&
-        (run.status === "failed" || run.status === "timed_out" || run.status === "cancelled");
+        (run.status === "failed" || run.status === "timed_out" || run.status === "cancelled") &&
+        !issue.originKind?.startsWith("plugin:");
 
       if (!issueNeedsImmediateRecovery) {
         return { kind: "released" as const };

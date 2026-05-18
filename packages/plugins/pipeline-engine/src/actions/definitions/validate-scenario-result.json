@@ -3,11 +3,11 @@
   "name": "Validate Scenario Result",
   "version": 1,
   "type": "single-decision",
-  "instructions": "Run the holdout scenario against the implementation.\n\n1. Start the full application stack\n2. Execute each scenario step against the running app\n3. For EACH step: take a screenshot and upload it to the issue as an attachment (see 'Uploading Attachments' in your worker skill). This is mandatory evidence — text descriptions alone are not acceptable.\n4. Evaluate satisfaction_criteria — each criterion scores 0 or 1\n5. Calculate overall score = passed_criteria / total_criteria\n\nOutput 'valid' if score >= 0.8, 'not-valid' if below.\n\nYou MUST actually run the app and interact with it. Self-scoring by reading code is prohibited.\nYou MUST upload screenshots as attachments to this issue for every scenario step. Use the attachment upload API documented in the pipeline-worker skill.",
+  "instructions": "Run the holdout scenario against the implementation.\n\n1. Start the full application stack\n2. Execute each scenario step against the running app\n3. For EACH step: take a screenshot and upload it to the issue as an attachment. This is mandatory evidence — text descriptions alone are not acceptable.\n4. Evaluate satisfaction_criteria — each criterion scores 0 or 1\n5. Calculate overall score = passed_criteria / total_criteria\n\nOutput decision based on score and which layer needs fixing:\n- 'valid' if score >= 0.8\n- 'not-valid-frontend' if failures are UI/styling/layout/component issues\n- 'not-valid-backend' if failures are API/data/logic issues\n- 'not-valid' if failures span both layers or are unclear\n\nYou MUST actually run the app and interact with it. Self-scoring by reading code is prohibited.\n\n## Uploading Screenshots\n\nUpload screenshots as multipart form-data to the Paperclip attachment API:\n\n```bash\ncurl -X POST \"${PAPERCLIP_BASE_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/issues/${PAPERCLIP_TASK_ID}/attachments\" \\\n  -H \"Authorization: Bearer ${PAPERCLIP_API_KEY}\" \\\n  -F \"file=@screenshot.png\"\n```\n\nThe response includes a `url` field with the uploaded attachment URL. Include these URLs in your validation report.",
   "outputSchema": {
     "type": "object",
     "properties": {
-      "decision": { "enum": ["valid", "not-valid"] }
+      "decision": { "enum": ["valid", "not-valid", "not-valid-frontend", "not-valid-backend"] }
     }
   }
 }
